@@ -1,0 +1,11 @@
+# IntelliJ IDEA local project settings
+.idea/
+
+# Project documents and instructions
+/documentations/
+
+# Local temporary files
+/tmp/
+
+# Maven build output
+**/target/
