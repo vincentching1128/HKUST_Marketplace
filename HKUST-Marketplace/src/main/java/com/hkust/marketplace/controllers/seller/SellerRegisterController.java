@@ -7,8 +7,13 @@ import com.hkust.marketplace.utils.SceneManager;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
+import com.hkust.marketplace.repositories.UserRepository;
+import java.sql.SQLException;
+import java.nio.charset.StandardCharsets;
 
 public class SellerRegisterController {
+
+    private final UserRepository userRepository = new UserRepository();
 
     @FXML private TextField usernameField;
     @FXML private TextField fullNameField;
@@ -22,6 +27,7 @@ public class SellerRegisterController {
     @FXML
     public void initialize() {
         meetupCombo.setItems(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
+        meetupCombo.getItems().add(0, "None");
     }
 
     @FXML
@@ -32,23 +38,53 @@ public class SellerRegisterController {
         String password = passwordField.getText();
         String confirm = confirmPasswordField.getText();
 
+
         if (username.isEmpty()) { showError("Username is required."); return; }
-        if (DummyDataService.getInstance().usernameExists(username)) {
-            showError("Username already taken."); return;
+        if (username.codePointCount(0, username.length()) > 50) {
+            showError("Username must be at most 50 characters."); return;
         }
         if (fullName.isEmpty()) { showError("Full Name cannot be empty."); return; }
+        if (fullName.codePointCount(0, fullName.length()) > 100) {
+            showError("Full Name must be at most 100 characters."); return;
+        }
+        String meetup = meetupCombo.getValue();
+        if ("None".equals(meetup)) meetup = null;
+        if (meetup != null && meetup.codePointCount(0, meetup.length()) > 100) {
+            showError("Preferred Meet-up Location must be at most 100 characters."); return;
+        }
+        String bio = bioArea.getText() == null ? "" : bioArea.getText().trim();
+        // MySQL TEXT is limited to 65,535 bytes rather than characters.
+        if (bio.getBytes(StandardCharsets.UTF_8).length > 65_535) {
+            showError("Seller Bio must be at most 65,535 UTF-8 bytes."); return;
+        }
         String pwdCheck = DummyDataService.checkPasswordStrength(password);
         if (!"OK".equals(pwdCheck)) { showError(pwdCheck); return; }
         if (!password.equals(confirm)) { showError("Passwords do not match."); return; }
 
         User user = new User(username.toLowerCase(), fullName, password, UserRole.SELLER);
-        if (meetupCombo.getValue() != null) user.setPreferredMeetup(meetupCombo.getValue());
-        if (bioArea.getText() != null && !bioArea.getText().isBlank()) user.setBio(bioArea.getText().trim());
-        DummyDataService.getInstance().registerUser(user);
+        if (meetup != null) user.setPreferredMeetup(meetup);
+        if (!bio.isBlank()) user.setBio(bio);
+        try {
+            if (userRepository.existsByUsername(user.getUsername())) {
+                showError("Username already taken.");
+                return;
+            }
+            userRepository.register(user);
 
-        showSuccess("Seller account created! You can now login.");
-        usernameField.clear(); fullNameField.clear(); passwordField.clear();
-        confirmPasswordField.clear(); meetupCombo.getSelectionModel().clearSelection(); bioArea.clear();
+            showSuccess("Seller account created! You can now login.");
+            usernameField.clear(); fullNameField.clear(); passwordField.clear();
+            confirmPasswordField.clear(); meetupCombo.getSelectionModel().clearSelection(); bioArea.clear();
+        } catch (IllegalArgumentException e) {
+            // The repository also checks for an existing username.
+            showError("Username already taken.");
+        } catch (SQLException e) {
+            if (e.getErrorCode() == 1062) {
+                // MySQL can reject a duplicate inserted after the initial check.
+                showError("Username already taken.");
+            } else {
+                showError("Unable to create your account. Please try again later.");
+            }
+        }
     }
 
     private void showError(String msg) {
