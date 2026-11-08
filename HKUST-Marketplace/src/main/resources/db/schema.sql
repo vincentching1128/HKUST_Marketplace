@@ -16,3 +16,21 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT chk_full_name_not_blank
     CHECK (CHAR_LENGTH(TRIM(full_name)) > 0)
     );
+
+-- ============================================================
+-- Seed demo accounts (same credentials as the in-memory demo).
+-- Passwords are stored as plaintext ONLY for the frontend demo;
+-- replace with BCrypt hashes once AuthService hashing is implemented.
+-- INSERT IGNORE keeps this script re-runnable (username is the PK).
+-- ============================================================
+INSERT IGNORE INTO users
+    (username, full_name, password_hash, role,
+     residence_hall, bio, preferred_meetup, active)
+VALUES
+    ('admin',   'HKUST Marketplace Admin', 'admin123',  'ADMIN',  NULL, NULL, NULL, TRUE),
+    ('alice',   'Alice Chan',              'password1', 'BUYER',  'Hall 3', NULL, NULL, TRUE),
+    ('bob',     'Bob Wong',                'password1', 'BUYER',  'Off-campus', NULL, NULL, TRUE),
+    ('charlie', 'Charlie Lee',             'password1', 'SELLER', NULL,
+     'Final year CSE student selling textbooks and gadgets.', 'Library', TRUE),
+    ('diana',   'Diana Ng',                'password1', 'SELLER', NULL,
+     'Selling furniture and kitchen items before graduation.', 'Hall 5 Lobby', TRUE);

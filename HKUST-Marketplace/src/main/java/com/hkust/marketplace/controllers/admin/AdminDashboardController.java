@@ -1,6 +1,7 @@
 package com.hkust.marketplace.controllers.admin;
 
 import com.hkust.marketplace.models.*;
+import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -11,6 +12,7 @@ import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -23,6 +25,7 @@ public class AdminDashboardController {
     @FXML private Button btnReview, btnAllListings, btnUsers, btnDeals, btnRatings, btnNotifications, btnProfile;
 
     private Button currentActiveBtn;
+    private final UserRepository userRepository = new UserRepository();
 
     @FXML
     public void initialize() {
@@ -185,7 +188,19 @@ public class AdminDashboardController {
         VBox root = new VBox(12);
         root.setPadding(new Insets(4));
 
-        for (User u : DummyDataService.getInstance().getAllUsers()) {
+        // Admin now manages the real MySQL users list (empty + error label on failure)
+        List<User> allUsers = List.of();
+        try {
+            allUsers = userRepository.findAll();
+        } catch (SQLException ex) {
+            ex.printStackTrace();
+            Label dbError = new Label("Could not load users from the database: " + ex.getMessage());
+            dbError.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
+            dbError.setWrapText(true);
+            root.getChildren().add(dbError);
+        }
+
+        for (User u : allUsers) {
             if (u.getRole() == UserRole.ADMIN) continue;
 
             HBox row = new HBox(12);
@@ -207,10 +222,7 @@ public class AdminDashboardController {
 
             Button toggle = new Button(u.isActive() ? "Deactivate" : "Activate");
             toggle.getStyleClass().addAll(u.isActive() ? "btn-danger" : "btn-success", "btn-sm");
-            toggle.setOnAction(e -> {
-                u.setActive(!u.isActive());
-                showUsers();
-            });
+            toggle.setOnAction(e -> toggleUserActive(u));
 
             Button delete = new Button("Delete");
             delete.getStyleClass().addAll("btn-danger", "btn-sm");
@@ -219,9 +231,7 @@ public class AdminDashboardController {
                         "Permanently delete user @" + u.getUsername() + "?");
                 conf.showAndWait().ifPresent(r -> {
                     if (r == ButtonType.OK) {
-                        u.setActive(false);
-                        new Alert(Alert.AlertType.INFORMATION, "User deactivated (demo safety).").showAndWait();
-                        showUsers();
+                        deactivateUser(u);
                     }
                 });
             });
@@ -232,6 +242,35 @@ public class AdminDashboardController {
         ScrollPane scroll = new ScrollPane(root);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
+    }
+
+    /** Persist the activate/deactivate toggle to MySQL, then reload the list from the database. */
+    private void toggleUserActive(User u) {
+        boolean newState = !u.isActive();
+        try {
+            userRepository.setActive(u.getUsername(), newState);
+            System.out.println("Toggled @" + u.getUsername() + " -> active=" + newState);
+            showUsers(); //re-read from DB so the badge reflects the stored value
+        } catch (SQLException ex) {
+            new Alert(Alert.AlertType.ERROR, "Database error: " + ex.getMessage()).showAndWait();
+        } catch (IllegalArgumentException ex) {
+            new Alert(Alert.AlertType.ERROR, "User not found in database: " + u.getUsername()).showAndWait();
+            showUsers(); //refresh in case the row was removed externally
+        }
+    }
+
+    /** "Delete" is a safe deactivation in this demo, now persisted to MySQL. */
+    private void deactivateUser(User u) {
+        try {
+            userRepository.setActive(u.getUsername(), false);
+            new Alert(Alert.AlertType.INFORMATION, "User deactivated (demo safety).").showAndWait();
+            showUsers();
+        } catch (SQLException ex) {
+            new Alert(Alert.AlertType.ERROR, "Database error: " + ex.getMessage()).showAndWait();
+        } catch (IllegalArgumentException ex) {
+            new Alert(Alert.AlertType.ERROR, "User not found in database: " + u.getUsername()).showAndWait();
+            showUsers();
+        }
     }
 
     @FXML
