@@ -114,7 +114,6 @@ public class UserRepository {
         }
     }
 
-    //TO BE IMPLEMENTED
     public void setActive(String username, boolean active) throws SQLException{
         if(!existsByUsername(username)){
             throw new IllegalArgumentException("No such username");
@@ -131,6 +130,7 @@ public class UserRepository {
             System.out.println(row + (active ? " activated" : " deactivated"));
         }
     }
+    //TO BE IMPLEMENTED
 
     public List<User> findAll() throws SQLException{
         String sql = "SELECT * FROM users ORDER BY username";
