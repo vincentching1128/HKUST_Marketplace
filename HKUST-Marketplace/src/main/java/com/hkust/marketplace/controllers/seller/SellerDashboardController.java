@@ -1,6 +1,8 @@
 package com.hkust.marketplace.controllers.seller;
 
 import com.hkust.marketplace.models.*;
+import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -16,11 +18,13 @@ import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
+import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 public class SellerDashboardController {
-
+    private final UserRepository userRepository = new UserRepository();
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
     @FXML private Label welcomeLabel;
@@ -358,7 +362,26 @@ public class SellerDashboardController {
     private void showProfile() {
         setActive(btnProfile, "My Profile");
         contentPane.getChildren().clear();
-        User user = SessionManager.getCurrentUser();
+        User sessionUser = SessionManager.getCurrentUser();
+        if (sessionUser == null) {
+            SceneManager.showSellerLogin();
+            return;
+        }
+        User user;
+        try{
+            user = userRepository.findByUsername((sessionUser.getUsername()));
+        }catch(SQLException e){
+            new Alert(Alert.AlertType.ERROR,
+            "Unable to load your profile. Please try again. ").showAndWait();
+            return;
+        }
+
+        if (user == null) {
+            SessionManager.logout();
+            SceneManager.showSellerLogin();
+            return;
+        }
+
         VBox form = new VBox(12);
         form.setMaxWidth(420);
         form.getStyleClass().add("card");
@@ -371,12 +394,61 @@ public class SellerDashboardController {
         TextArea bio = new TextArea(user != null && user.getBio() != null ? user.getBio() : "");
         bio.setPrefRowCount(3);
         ComboBox<String> meetup = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
+        meetup.getItems().add(0, "None");
+        meetup.setValue("None");
         if (user != null && user.getPreferredMeetup() != null) meetup.setValue(user.getPreferredMeetup());
         meetup.setMaxWidth(Double.MAX_VALUE);
 
         Button save = new Button("Save Changes");
         save.getStyleClass().add("btn-gold");
-        save.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION, "Profile saved (demo).").showAndWait());
+        save.setOnAction(e -> {
+            String fullname = name.getText().trim();
+            String bioInfo = bio.getText().trim();
+            String PreferredMeetupLocation = meetup.getValue();
+            if ("None".equals(PreferredMeetupLocation)) PreferredMeetupLocation = null;
+            //validation logic
+            if (fullname.isEmpty()){
+                new Alert(Alert.AlertType.WARNING, "Full Name cannot be empty.").showAndWait();
+                return;
+            }
+            if (fullname.codePointCount(0, fullname.length()) > 100) {
+                new Alert(Alert.AlertType.WARNING, "Full Name must be at most 100 characters.").showAndWait();
+                return;
+            }
+            if (bioInfo.getBytes(StandardCharsets.UTF_8).length > 65_535) {
+                new Alert(Alert.AlertType.WARNING, "Your bio is too long. Please shorten it.").showAndWait();
+                return;
+            }
+            if (PreferredMeetupLocation != null &&
+                    PreferredMeetupLocation.codePointCount(0, PreferredMeetupLocation.length()) > 100) {
+                new Alert(Alert.AlertType.WARNING,
+                        "Preferred Meet-up Location must be at most 100 characters.").showAndWait();
+                return;
+            }
+            // Keep edits separate until the database confirms the save.
+            User profileUpdate = new User();
+            profileUpdate.setUsername(user.getUsername());
+            profileUpdate.setFullName(fullname);
+            profileUpdate.setResidenceHall(user.getResidenceHall());
+            profileUpdate.setBio(bioInfo);
+            profileUpdate.setPreferredMeetup(PreferredMeetupLocation);
+            try{
+                boolean updated = userRepository.updateProfile(profileUpdate);
+                if (!updated){
+                    new Alert(Alert.AlertType.ERROR, "Profile not found").showAndWait();
+                    return;
+                } //no username found and creates no updates
+
+                // Update only profile fields, preserving the session's other account data.
+                sessionUser.setFullName(fullname);
+                sessionUser.setBio(bioInfo);
+                sessionUser.setPreferredMeetup(PreferredMeetupLocation);
+                welcomeLabel.setText("Hello, " + sessionUser.getFullName());
+                new Alert(Alert.AlertType.INFORMATION, "profile saved").showAndWait();
+            } catch (SQLException ex){
+                new Alert(Alert.AlertType.ERROR, "Unable to save your profile. please try again. ").showAndWait();
+            }
+        });
 
         form.getChildren().addAll(
                 new Label("Full Name"), name,

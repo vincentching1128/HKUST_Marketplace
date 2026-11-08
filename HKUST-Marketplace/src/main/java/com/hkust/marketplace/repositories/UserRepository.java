@@ -57,7 +57,7 @@ public class UserRepository {
         }
     }
 
-    public void save(User user) throws SQLException {
+    public void register(User user) throws SQLException {
         if (existsByUsername(user.getUsername())){
             throw new IllegalArgumentException("Username already exists");
         } //double check if username already exist in the database
@@ -83,15 +83,38 @@ public class UserRepository {
 
     }
 
-    //TO BE IMPLEMENTED
+    /** Updates profile fields for the supplied username. Returns false if no user matches. */
     public boolean updateProfile(User user) throws SQLException{
-        return true;
+        String sql = """
+            UPDATE users
+            SET full_name = ?, residence_hall = ?, bio = ?, preferred_meetup = ?
+            WHERE username = ?
+            """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, user.getFullName());
+            stmt.setString(2, user.getResidenceHall());
+            stmt.setString(3, user.getBio());
+            stmt.setString(4, user.getPreferredMeetup());
+            stmt.setString(5, user.getUsername());
+
+            return stmt.executeUpdate() > 0;
+        }
     }
 
+    /** Stores an already hashed password. Authentication and authorization belong to the caller. */
     public boolean updatePasswordHash(String username, String hash) throws SQLException{
-        return true;
+        String sql = "UPDATE users SET password_hash = ? WHERE username = ?";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, hash);
+            stmt.setString(2, username);
+
+            return stmt.executeUpdate() > 0;
+        }
     }
 
+    //TO BE IMPLEMENTED
     public void setActive(String username, boolean active) throws SQLException{
         if(!existsByUsername(username)){
             throw new IllegalArgumentException("No such username");
