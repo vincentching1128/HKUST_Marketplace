@@ -27,6 +27,7 @@ public class SellerRegisterController {
     @FXML
     public void initialize() {
         meetupCombo.setItems(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
+        meetupCombo.getItems().add(0, "None");
     }
 
     @FXML
@@ -47,6 +48,7 @@ public class SellerRegisterController {
             showError("Full Name must be at most 100 characters."); return;
         }
         String meetup = meetupCombo.getValue();
+        if ("None".equals(meetup)) meetup = null;
         if (meetup != null && meetup.codePointCount(0, meetup.length()) > 100) {
             showError("Preferred Meet-up Location must be at most 100 characters."); return;
         }
