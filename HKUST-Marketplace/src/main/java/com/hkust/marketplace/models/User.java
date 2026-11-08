@@ -30,7 +30,7 @@ public class User {
         this.passwordHash = password; // Demo only – in production hash it!
         this.role = role;
     }
-
+    //testing
     // Getters & Setters
     public String getUsername() { return username; }
     public void setUsername(String username) { this.username = username; }

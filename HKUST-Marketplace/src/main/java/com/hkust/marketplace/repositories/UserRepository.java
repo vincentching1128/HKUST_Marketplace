@@ -25,19 +25,23 @@ public class UserRepository {
                     return null;
                 }
 
-                User user = new User(); //create new user in the backend (not database)
-                user.setUsername(rs.getString("username"));
-                user.setFullName(rs.getString("full_name"));
-                user.setPasswordHash(rs.getString("password_hash"));
-                user.setRole(UserRole.valueOf(rs.getString("role")));
-                user.setResidenceHall(rs.getString("residence_hall"));
-                user.setBio(rs.getString("bio"));
-                user.setPreferredMeetup(rs.getString("preferred_meetup"));
-                user.setActive(rs.getBoolean("active"));
-                user.setCreatedAt(rs.getTimestamp("created_at").toLocalDateTime());
-                return user;
+                return mapRow(rs); //turn the current row into a User object
             }
         }
+    }
+
+    private User mapRow(ResultSet rs) throws SQLException {
+        User user = new User(); //create new user in the backend (not database)
+        user.setUsername(rs.getString("username"));
+        user.setFullName(rs.getString("full_name"));
+        user.setPasswordHash(rs.getString("password_hash"));
+        user.setRole(UserRole.valueOf(rs.getString("role")));
+        user.setResidenceHall(rs.getString("residence_hall"));
+        user.setBio(rs.getString("bio"));
+        user.setPreferredMeetup(rs.getString("preferred_meetup"));
+        user.setActive(rs.getBoolean("active"));
+        user.setCreatedAt(rs.getTimestamp("created_at").toLocalDateTime());
+        return user;
     }
 
     public boolean existsByUsername(String target) throws SQLException {
@@ -110,13 +114,34 @@ public class UserRepository {
         }
     }
 
-    //TO BE IMPLEMENTED
     public void setActive(String username, boolean active) throws SQLException{
-        return;
+        if(!existsByUsername(username)){
+            throw new IllegalArgumentException("No such username");
+        }
+        String sql = "UPDATE users SET active = ? WHERE username = ?";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setBoolean(1, active); //write the requested state
+            stmt.setString(2,username);
+            int row = stmt.executeUpdate();
+            if (row == 0) { //row disappeared between the check and the update
+                throw new IllegalArgumentException("No such username");
+            }
+            System.out.println(row + (active ? " activated" : " deactivated"));
+        }
     }
+    //TO BE IMPLEMENTED
 
     public List<User> findAll() throws SQLException{
+        String sql = "SELECT * FROM users ORDER BY username";
         List<User> users = new ArrayList<>();
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                users.add(mapRow(rs));
+            }
+        }
         return users;
     }
 
