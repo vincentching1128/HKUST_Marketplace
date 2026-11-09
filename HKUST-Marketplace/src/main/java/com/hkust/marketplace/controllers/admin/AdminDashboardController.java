@@ -6,12 +6,14 @@ import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.collections.FXCollections;
+import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -218,7 +220,8 @@ public class AdminDashboardController {
 
             Button edit = new Button("Edit");
             edit.getStyleClass().addAll("btn-outline", "btn-sm");
-            edit.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION, "Edit user dialog (demo).").showAndWait());
+            edit.setOnAction(e -> openEditUserDialog(u.getUsername()));
+            //Alert(Alert.AlertType.INFORMATION, "Edit user dialog (demo).").showAndWait());
 
             Button toggle = new Button(u.isActive() ? "Deactivate" : "Activate");
             toggle.getStyleClass().addAll(u.isActive() ? "btn-danger" : "btn-success", "btn-sm");
@@ -271,6 +274,135 @@ public class AdminDashboardController {
             new Alert(Alert.AlertType.ERROR, "User not found in database: " + u.getUsername()).showAndWait();
             showUsers();
         }
+    }
+    private void openEditUserDialog(String username) {
+        // 1. Load the target account fresh from the database (the row in the list may be stale).
+        User target;
+        try {
+            target = userRepository.findByUsername(username);
+        } catch (SQLException ex) {
+            new Alert(Alert.AlertType.ERROR,
+                    "Unable to load user @" + username + ". Please try again.").showAndWait();
+            return;
+        }
+        if (target == null) {
+            new Alert(Alert.AlertType.WARNING, "User @" + username + " no longer exists.").showAndWait();
+            showUsers();
+            return;
+        }
+
+        // 2. Build the edit form (profile fields only; username/role are read-only).
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.initOwner(SceneManager.getPrimaryStage());
+        dialog.setTitle("Edit User");
+        dialog.setHeaderText("Editing @" + target.getUsername() + " (" + target.getRole().name() + ")");
+        ButtonType saveType = new ButtonType("Save Changes", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(saveType, ButtonType.CANCEL);
+        dialog.getDialogPane().setPrefWidth(440);
+
+        VBox form = new VBox(8);
+        form.setPadding(new Insets(10));
+
+        Label accountLabel = new Label("@" + target.getUsername() + " · " + target.getRole().name());
+        accountLabel.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
+
+        TextField fullName = new TextField(target.getFullName() != null ? target.getFullName() : "");
+        fullName.setPromptText("Full Name *");
+        fullName.setMaxWidth(Double.MAX_VALUE);
+
+        final ComboBox<String> residenceCombo;
+        final TextArea bioArea;
+        final ComboBox<String> meetupCombo;
+        if (target.getRole() == UserRole.BUYER) {
+            residenceCombo = new ComboBox<>(FXCollections.observableArrayList(
+                    "Hall 1", "Hall 2", "Hall 3", "Hall 4", "Hall 5",
+                    "Hall 6", "Hall 7", "Hall 8", "Hall 9",
+                    "UG Hall 1", "UG Hall 2", "Off-campus", "None"));
+            residenceCombo.setMaxWidth(Double.MAX_VALUE);
+            residenceCombo.setValue(target.getResidenceHall() != null ? target.getResidenceHall() : "None");
+            bioArea = null;
+            meetupCombo = null;
+            form.getChildren().addAll(accountLabel, new Label("Full Name *"), fullName,
+                    new Label("Residence Hall"), residenceCombo);
+        } else if (target.getRole() == UserRole.SELLER) {
+            bioArea = new TextArea(target.getBio() != null ? target.getBio() : "");
+            bioArea.setPrefRowCount(3);
+            bioArea.setWrapText(true);
+            meetupCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
+            meetupCombo.getItems().add(0, "None");
+            meetupCombo.setMaxWidth(Double.MAX_VALUE);
+            meetupCombo.setValue(target.getPreferredMeetup() != null ? target.getPreferredMeetup() : "None");
+            residenceCombo = null;
+            form.getChildren().addAll(accountLabel, new Label("Full Name *"), fullName,
+                    new Label("Bio"), bioArea,
+                    new Label("Preferred Meet-up"), meetupCombo);
+        } else {
+            residenceCombo = null;
+            bioArea = null;
+            meetupCombo = null;
+            form.getChildren().addAll(accountLabel, new Label("Full Name *"), fullName);
+        }
+
+        dialog.getDialogPane().setContent(form);
+
+        // 3. Validate on "Save Changes" without closing the dialog; same rules as the seller profile.
+        Button saveButton = (Button) dialog.getDialogPane().lookupButton(saveType);
+        saveButton.addEventFilter(ActionEvent.ACTION, event -> {
+            String fullNameValue = fullName.getText() == null ? "" : fullName.getText().trim();
+            if (fullNameValue.isEmpty()) {
+                new Alert(Alert.AlertType.WARNING, "Full Name cannot be empty.").showAndWait();
+                event.consume();
+                return;
+            }
+            if (fullNameValue.codePointCount(0, fullNameValue.length()) > 100) {
+                new Alert(Alert.AlertType.WARNING, "Full Name must be at most 100 characters.").showAndWait();
+                event.consume();
+                return;
+            }
+
+            String bioValue = bioArea != null ? bioArea.getText().trim() : target.getBio();
+            if (bioValue != null && bioValue.getBytes(StandardCharsets.UTF_8).length > 65_535) {
+                new Alert(Alert.AlertType.WARNING, "Your bio is too long. Please shorten it.").showAndWait();
+                event.consume();
+                return;
+            }
+
+            String meetupValue = meetupCombo != null ? meetupCombo.getValue() : target.getPreferredMeetup();
+            if ("None".equals(meetupValue)) meetupValue = null;
+            if (meetupValue != null && meetupValue.codePointCount(0, meetupValue.length()) > 100) {
+                new Alert(Alert.AlertType.WARNING,
+                        "Preferred Meet-up Location must be at most 100 characters.").showAndWait();
+                event.consume();
+                return;
+            }
+
+            String residenceValue = residenceCombo != null ? residenceCombo.getValue() : target.getResidenceHall();
+            if ("None".equals(residenceValue)) residenceValue = null;
+
+            // 4. Save. Copy the fields that were not shown from the loaded target so they are not blanked.
+            User update = new User();//set the updated information
+            update.setUsername(target.getUsername());
+            update.setFullName(fullNameValue);
+            update.setBio(bioValue);
+            update.setPreferredMeetup(meetupValue);
+            update.setResidenceHall(residenceValue);
+            try {//update info in database
+                if (!userRepository.updateProfile(update)) {
+                    new Alert(Alert.AlertType.ERROR, "User no longer exists.").showAndWait();
+                    event.consume();
+                    dialog.close();
+                    return;
+                }
+                new Alert(Alert.AlertType.INFORMATION, "Profile saved.").showAndWait();
+            } catch (SQLException ex) {
+                new Alert(Alert.AlertType.ERROR,
+                        "Unable to save changes. Please try again.").showAndWait();
+                event.consume();
+            }
+        });
+
+        dialog.showAndWait();
+        showUsers(); // refresh so the edited row shows the persisted values
     }
 
     @FXML

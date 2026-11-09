@@ -130,7 +130,7 @@ public class UserRepository {
             System.out.println(row + (active ? " activated" : " deactivated"));
         }
     }
-    //TO BE IMPLEMENTED
+
 
     public List<User> findAll() throws SQLException{
         String sql = "SELECT * FROM users ORDER BY username";
@@ -145,6 +145,6 @@ public class UserRepository {
         return users;
     }
 
-
+    //TO BE IMPLEMENTED
 
 }
