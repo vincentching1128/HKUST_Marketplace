@@ -528,7 +528,24 @@ public class AdminDashboardController {
     private void showProfile() {
         setActive(btnProfile, "My Profile");
         contentPane.getChildren().clear();
-        User user = SessionManager.getCurrentUser();
+        User sessionUser = SessionManager.getCurrentUser();
+        if (sessionUser == null) {
+            SceneManager.showAdminLogin();
+            return;
+        }
+        User user;//get user account in database
+        try{
+            user = userRepository.findByUsername((sessionUser.getUsername()));
+        }catch(SQLException e){
+            new Alert(Alert.AlertType.ERROR,
+                    "Unable to load your profile. Please try again. ").showAndWait();
+            return;
+        }
+        if (user == null) {
+            SessionManager.logout();
+            SceneManager.showAdminLogin();
+            return;
+        }
         VBox form = new VBox(12);
         form.setMaxWidth(400);
         form.getStyleClass().add("card");
@@ -537,12 +554,43 @@ public class AdminDashboardController {
         titleLbl.getStyleClass().add("section-title");
         form.getChildren().add(titleLbl);
 
-        TextField name = new TextField(user != null ? user.getFullName() : "");
+        TextField name = new TextField(user.getFullName());
         PasswordField pass = new PasswordField();
         pass.setPromptText("New password (optional)");
+
         Button save = new Button("Save");
         save.getStyleClass().add("btn-success");
-        save.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION, "Profile updated (demo).").showAndWait());
+
+        save.setOnAction(e -> {
+
+            String fullname = name.getText().trim();
+            if (fullname.isEmpty()){
+                new Alert(Alert.AlertType.WARNING, "Full Name cannot be empty.").showAndWait();
+                return;
+            }
+            if (fullname.codePointCount(0, fullname.length()) > 100) {
+                new Alert(Alert.AlertType.WARNING, "Full Name must be at most 100 characters.").showAndWait();
+                return;
+            }
+            User profileUpdate = new User();
+            profileUpdate.setUsername(user.getUsername());
+            profileUpdate.setFullName(fullname);//get modified
+            profileUpdate.setBio(user.getBio());
+            profileUpdate.setPreferredMeetup(user.getPreferredMeetup());
+            try{
+                boolean updated = userRepository.updateProfile(profileUpdate);
+                if (!updated){
+                    new Alert(Alert.AlertType.ERROR, "Profile not found").showAndWait();
+                    return;
+                } //no username found and creates no updates
+                sessionUser.setFullName(fullname);
+                welcomeLabel.setText("Admin: " + fullname);
+                new Alert(Alert.AlertType.INFORMATION, "Profile updated (demo).").showAndWait();
+            }catch(SQLException exc){
+                new Alert(Alert.AlertType.ERROR, "Unable to save your profile. please try again. ").showAndWait();
+            }
+
+        });
         form.getChildren().addAll(new Label("Full Name"), name, new Label("New Password"), pass, save);
         contentPane.getChildren().add(form);
     }
