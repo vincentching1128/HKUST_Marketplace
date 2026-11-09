@@ -2,6 +2,7 @@ package com.hkust.marketplace.controllers.admin;
 
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -575,17 +576,24 @@ public class AdminDashboardController {
             User profileUpdate = new User();
             profileUpdate.setUsername(user.getUsername());
             profileUpdate.setFullName(fullname);//get modified
+            profileUpdate.setResidenceHall(user.getResidenceHall());
             profileUpdate.setBio(user.getBio());
             profileUpdate.setPreferredMeetup(user.getPreferredMeetup());
             try{
-                boolean updated = userRepository.updateProfile(profileUpdate);
+                boolean updated = new AuthService(userRepository).updateProfile(profileUpdate, pass.getText());
                 if (!updated){
                     new Alert(Alert.AlertType.ERROR, "Profile not found").showAndWait();
                     return;
                 } //no username found and creates no updates
                 sessionUser.setFullName(fullname);
+                if (profileUpdate.getPasswordHash() != null) {
+                    sessionUser.setPasswordHash(profileUpdate.getPasswordHash());
+                }
+                pass.clear();
                 welcomeLabel.setText("Admin: " + fullname);
-                new Alert(Alert.AlertType.INFORMATION, "Profile updated (demo).").showAndWait();
+                new Alert(Alert.AlertType.INFORMATION, "Profile updated.").showAndWait();
+            }catch(IllegalArgumentException invalidPassword){
+                new Alert(Alert.AlertType.WARNING, invalidPassword.getMessage()).showAndWait();
             }catch(SQLException exc){
                 new Alert(Alert.AlertType.ERROR, "Unable to save your profile. please try again. ").showAndWait();
             }
