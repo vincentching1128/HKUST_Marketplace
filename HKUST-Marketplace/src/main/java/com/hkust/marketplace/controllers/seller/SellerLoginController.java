@@ -1,6 +1,5 @@
 package com.hkust.marketplace.controllers.seller;
 
-import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.utils.SceneManager;
@@ -11,7 +10,6 @@ import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 
 import java.sql.SQLException;
-import java.util.Locale;
 
 public class SellerLoginController {
 
@@ -23,7 +21,7 @@ public class SellerLoginController {
 
     @FXML
     private void handleLogin() {
-        String username = usernameField.getText().trim().toLowerCase(Locale.ROOT);
+        String username = usernameField.getText().trim();
         String password = passwordField.getText();
         errorLabel.setVisible(false);
         errorLabel.setManaged(false);
@@ -33,26 +31,25 @@ public class SellerLoginController {
             return;
         }
         //login by finding actual user in the database
-        User user;
+        AuthService.LoginResult result;
         try {
-            user = authService.authenticate(username, password, UserRole.SELLER);
+            result = authService.login(username, password, UserRole.SELLER);
         } catch (SQLException e) {
-            showError("Unable to sign in. Please try again.");
+            showError("Unable to sign in. Please check the database connection and try again.");
             return;
         }
-        if (user == null) {
-            showError("Invalid seller credentials or account deactivated.");
+        if (result.status() != AuthService.LoginStatus.SUCCESS) {
+            showError(switch (result.status()) {
+                case USER_NOT_FOUND -> "User not found.";
+                case WRONG_ROLE -> "This account is not a Seller account. Use the correct portal.";
+                case ACCOUNT_DEACTIVATED -> "Account deactivated.";
+                case INCORRECT_PASSWORD -> "Incorrect password.";
+                case ACCOUNT_CHANGED -> "Account changed during sign-in. Please try again.";
+                default -> "Please enter a valid username and password.";
+            });
             return;
         }
-        if (user.getRole() != UserRole.SELLER) {
-            showError("This account is not a Seller account. Use the correct portal.");
-            return;
-        }
-        if (!user.isActive()) {
-            showError("Account deactivated.");
-            return;
-        }
-        SessionManager.login(user);
+        SessionManager.login(result.user());
         SceneManager.showSellerDashboard();
     }
 

@@ -9,6 +9,13 @@ import java.util.Objects;
 
 
 public class AuthService {
+    public enum LoginStatus {
+        SUCCESS, INVALID_INPUT, USER_NOT_FOUND, WRONG_ROLE, ACCOUNT_DEACTIVATED,
+        INCORRECT_PASSWORD, ACCOUNT_CHANGED
+    }
+
+    public record LoginResult(LoginStatus status, User user) { }
+
     private final UserRepository users;
 
     public AuthService() {
@@ -20,21 +27,33 @@ public class AuthService {
     }
 
     public User authenticate(String username, String password, UserRole role) throws SQLException {
+        return login(username, password, role).user();
+    }
+
+    /** Uses the repository once to identify the account and explain a rejected login. */
+    public LoginResult login(String username, String password, UserRole role) throws SQLException {
         if (username == null || username.isBlank() || password == null || password.isEmpty()
-                || password.length() > PasswordHasher.MAX_PASSWORD_LENGTH || role == null) return null;
+                || password.length() > PasswordHasher.MAX_PASSWORD_LENGTH || role == null)
+            return new LoginResult(LoginStatus.INVALID_INPUT, null);
         User user = users.findByUsername(username.trim().toLowerCase(Locale.ROOT));
-        if (user == null || user.getRole() != role || !user.isActive()) return null;
+        if (user == null) return new LoginResult(LoginStatus.USER_NOT_FOUND, null);
+        if (user.getRole() != role) return new LoginResult(LoginStatus.WRONG_ROLE, null);
+        if (!user.isActive()) return new LoginResult(LoginStatus.ACCOUNT_DEACTIVATED, null);
         String stored = user.getPasswordHash();
         if (PasswordHasher.isHash(stored)) {
-            return PasswordHasher.verify(password, stored) ? user : null;
+            return PasswordHasher.verify(password, stored)
+                    ? new LoginResult(LoginStatus.SUCCESS, user)
+                    : new LoginResult(LoginStatus.INCORRECT_PASSWORD, null);
         }
-        if (!PasswordHasher.verifyLegacy(password, stored)) return null;
+        if (!PasswordHasher.verifyLegacy(password, stored))
+            return new LoginResult(LoginStatus.INCORRECT_PASSWORD, null);
 
         String upgraded = PasswordHasher.hash(password);
         // A simultaneous password change must not be overwritten by this login.
-        if (!users.replacePasswordHash(user.getUsername(), stored, upgraded)) return null;
+        if (!users.replacePasswordHash(user.getUsername(), stored, upgraded))
+            return new LoginResult(LoginStatus.ACCOUNT_CHANGED, null);
         user.setPasswordHash(upgraded);
-        return user;
+        return new LoginResult(LoginStatus.SUCCESS, user);
     }
 
     public void register(User user, String password) throws SQLException {
