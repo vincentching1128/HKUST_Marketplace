@@ -1,11 +1,19 @@
 # IntelliJ IDEA local project settings
 .idea/
+.run/
+
+# Local review checkouts
+/.worktrees/
 
 # Project documents and instructions
 /documentations/
 
 # Local temporary files
 /tmp/
+*.tmp
+*.temp
+*.bak
+*~
 
 # Maven build output
 **/target/

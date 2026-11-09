@@ -16,6 +16,7 @@ import java.util.Locale;
 public class SellerRegisterController {
 
     private final UserRepository userRepository = new UserRepository();
+    private final AuthService authService = new AuthService(userRepository);
 
     @FXML private TextField usernameField;
     @FXML private TextField fullNameField;
@@ -59,7 +60,7 @@ public class SellerRegisterController {
         if (bio.getBytes(StandardCharsets.UTF_8).length > 65_535) {
             showError("Seller Bio must be at most 65,535 UTF-8 bytes."); return;
         }
-        String pwdCheck = DummyDataService.checkPasswordStrength(password);
+        String pwdCheck = AuthService.checkPasswordStrength(password);
         if (!"OK".equals(pwdCheck)) { showError(pwdCheck); return; }
         if (!password.equals(confirm)) { showError("Passwords do not match."); return; }
 
@@ -71,14 +72,14 @@ public class SellerRegisterController {
                 showError("Username already taken.");
                 return;
             }
-            new AuthService(userRepository).register(user, password);
+            authService.register(user, password);
 
             showSuccess("Seller account created! You can now login.");
             usernameField.clear(); fullNameField.clear(); passwordField.clear();
             confirmPasswordField.clear(); meetupCombo.getSelectionModel().clearSelection(); bioArea.clear();
         } catch (IllegalArgumentException e) {
             // The repository also checks for an existing username.
-            showError("Username already taken.");
+            showError(e.getMessage());
         } catch (SQLException e) {
             if (e.getErrorCode() == 1062) {
                 // MySQL can reject a duplicate inserted after the initial check.

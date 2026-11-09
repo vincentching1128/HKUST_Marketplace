@@ -15,6 +15,79 @@ class AuthServiceTest {
     private final AuthService service = new AuthService(users);
 
     @Test
+    void allRolesLoginReportDistinctFailuresWithoutReturningAnAccount() throws Exception {
+        for (UserRole role : UserRole.values()) {
+            users.user = null;
+            assertRejected(AuthService.LoginStatus.USER_NOT_FOUND, "missing", "Password123!", role);
+            assertRejected(AuthService.LoginStatus.INVALID_INPUT, "", "Password123!", role);
+            users.user = new User("account", "Account", "Password123!",
+                    role == UserRole.BUYER ? UserRole.SELLER : UserRole.BUYER);
+            assertRejected(AuthService.LoginStatus.WRONG_ROLE, "account", "Password123!", role);
+            assertEquals(0, users.replacements);
+            users.user.setRole(role);
+            users.user.setActive(false);
+            assertRejected(AuthService.LoginStatus.ACCOUNT_DEACTIVATED, "account", "Password123!", role);
+            users.user.setActive(true);
+            assertRejected(AuthService.LoginStatus.INCORRECT_PASSWORD, "account", "wrong", role);
+            assertEquals(0, users.replacements);
+            users.allowReplace = false;
+            assertRejected(AuthService.LoginStatus.ACCOUNT_CHANGED, "account", "Password123!", role);
+            users.allowReplace = true;
+        }
+    }
+
+    @Test
+    void allRolesPasswordsPersistThroughRepositoryAndVerifyOnLogin() throws Exception {
+        for (UserRole role : UserRole.values()) {
+            User account = new User("account", "Account", null, role);
+            service.register(account, "OriginalPassword123!");
+            String originalHash = account.getPasswordHash();
+            AuthService.LoginResult login = service.login(" ACCOUNT ", "OriginalPassword123!", role);
+            assertEquals(AuthService.LoginStatus.SUCCESS, login.status());
+            assertSame(account, login.user());
+            assertRejected(AuthService.LoginStatus.INCORRECT_PASSWORD, "account", originalHash, role);
+            assertTrue(service.updateProfile(account, ""));
+            assertEquals(originalHash, account.getPasswordHash());
+            assertTrue(service.updateProfile(account, "ChangedPassword123!"));
+            assertEquals(account.getPasswordHash(), users.profileHash);
+            assertTrue(PasswordHasher.verify("ChangedPassword123!", users.profileHash));
+            assertRejected(AuthService.LoginStatus.INCORRECT_PASSWORD, "account", "OriginalPassword123!", role);
+            assertEquals(AuthService.LoginStatus.SUCCESS,
+                    service.login("account", "ChangedPassword123!", role).status());
+        }
+    }
+
+    private void assertRejected(AuthService.LoginStatus expected, String username,
+                                String password, UserRole role) throws SQLException {
+        AuthService.LoginResult result = service.login(username, password, role);
+        assertEquals(expected, result.status());
+        assertNull(result.user());
+    }
+
+    @Test
+    void everyRoleRejectsOtherPortalsAndUpgradesLegacyPasswordOnlyInItsOwnPortal() throws Exception {
+        for (UserRole accountRole : UserRole.values()) {
+            users.user = new User("account", "Account", "LegacyPassword123!", accountRole);
+            int previousReplacements = users.replacements;
+            for (UserRole portal : UserRole.values()) {
+                if (portal != accountRole) {
+                    assertRejected(AuthService.LoginStatus.WRONG_ROLE, "account", "LegacyPassword123!", portal);
+                }
+            }
+            assertEquals(previousReplacements, users.replacements);
+            assertEquals(AuthService.LoginStatus.SUCCESS,
+                    service.login("account", "LegacyPassword123!", accountRole).status());
+            assertEquals(previousReplacements + 1, users.replacements);
+            assertTrue(PasswordHasher.verify("LegacyPassword123!", users.user.getPasswordHash()));
+            for (UserRole portal : UserRole.values()) {
+                if (portal != accountRole) {
+                    assertRejected(AuthService.LoginStatus.WRONG_ROLE, "account", "LegacyPassword123!", portal);
+                }
+            }
+        }
+    }
+
+    @Test
     void registrationStoresOnlyHashAndNormalizesUsername() throws Exception {
         User seller = new User(" NewSeller ", "Seller", null, UserRole.SELLER);
         service.register(seller, "StrongPassword123!");
