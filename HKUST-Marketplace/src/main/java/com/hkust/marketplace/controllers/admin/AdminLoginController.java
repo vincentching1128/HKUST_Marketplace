@@ -2,8 +2,7 @@ package com.hkust.marketplace.controllers.admin;
 
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
-import com.hkust.marketplace.repositories.UserRepository;
-//import com.hkust.marketplace.utils.DummyDataService;
+import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.fxml.FXML;
@@ -20,7 +19,7 @@ public class AdminLoginController {
     @FXML private PasswordField passwordField;
     @FXML private Label errorLabel;
 
-    private final UserRepository userRepository = new UserRepository();
+    private final AuthService authService = new AuthService();
 
     @FXML
     private void handleLogin() {
@@ -35,16 +34,13 @@ public class AdminLoginController {
         }
         User user;
         try{
-            user = userRepository.findByUsername(username);
+            user = authService.authenticate(username, password, UserRole.ADMIN);
         } catch (SQLException e) {
-            throw new RuntimeException(e);
+            showError("Unable to sign in. Please check the database connection and try again.");
+            return;
         }
         if (user == null || user.getRole() != UserRole.ADMIN) {
             showError("Invalid admin credentials.");
-            return;
-        }
-        if (!user.getPasswordHash().equals(password)) {
-            showError("Incorrect password.");
             return;
         }
         SessionManager.login(user);

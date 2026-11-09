@@ -4,6 +4,8 @@ import com.hkust.marketplace.models.Listing;
 import com.hkust.marketplace.models.ListingType;
 import com.hkust.marketplace.models.Notification;
 import com.hkust.marketplace.models.User;
+import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.PasswordHasher;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -344,6 +346,10 @@ public class BuyerDashboardController {
 
         User user = SessionManager.getCurrentUser();
         VBox form = new VBox(14);
+        if (user == null) {
+            SceneManager.showBuyerLogin();
+            return;
+        }
         form.setPadding(new Insets(8));
         form.setMaxWidth(420);
         form.getStyleClass().add("card");
@@ -367,7 +373,32 @@ public class BuyerDashboardController {
         Button saveBtn = new Button("Save Changes");
         saveBtn.getStyleClass().add("btn-primary");
         saveBtn.setOnAction(e -> {
-            new Alert(Alert.AlertType.INFORMATION, "Profile updated successfully!\n(Demo only – changes are in-memory)").showAndWait();
+            String fullName = nameField.getText().trim();
+            if (fullName.isEmpty() || fullName.codePointCount(0, fullName.length()) > 100) {
+                new Alert(Alert.AlertType.WARNING, "Full Name must contain 1 to 100 characters.").showAndWait();
+                return;
+            }
+            String password = newPass.getText();
+            if (!password.equals(confirmPass.getText())) {
+                new Alert(Alert.AlertType.WARNING, "Passwords do not match.").showAndWait();
+                return;
+            }
+            String hash = null;
+            if (!password.isEmpty()) {
+                String validation = AuthService.checkPasswordStrength(password);
+                if (!"OK".equals(validation)) {
+                    new Alert(Alert.AlertType.WARNING, validation).showAndWait();
+                    return;
+                }
+                hash = PasswordHasher.hash(password);
+            }
+            user.setFullName(fullName);
+            user.setResidenceHall(residence.getValue());
+            if (hash != null) user.setPasswordHash(hash);
+            newPass.clear();
+            confirmPass.clear();
+            welcomeLabel.setText("Hello, " + fullName);
+            new Alert(Alert.AlertType.INFORMATION, "Profile updated for this demo session.").showAndWait();
         });
 
         form.getChildren().addAll(title,

@@ -3,6 +3,7 @@ package com.hkust.marketplace.repositories;
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
 import com.hkust.marketplace.utils.DatabaseManager;
+import com.hkust.marketplace.services.PasswordHasher;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -58,6 +59,7 @@ public class UserRepository {
     }
 
     public void register(User user) throws SQLException {
+        requireHash(user.getPasswordHash());
         if (existsByUsername(user.getUsername())){
             throw new IllegalArgumentException("Username already exists");
         } //double check if username already exist in the database
@@ -85,18 +87,28 @@ public class UserRepository {
 
     /** Updates profile fields for the supplied username. Returns false if no user matches. */
     public boolean updateProfile(User user) throws SQLException{
+        return updateProfile(user, null);
+    }
+
+    public boolean updateProfile(User user, String passwordHash) throws SQLException {
+        if (passwordHash != null) requireHash(passwordHash);
         String sql = """
             UPDATE users
             SET full_name = ?, residence_hall = ?, bio = ?, preferred_meetup = ?
-            WHERE username = ?
-            """;
+            """ + (passwordHash == null ? " WHERE username = ?"
+                : ", password_hash = ? WHERE username = ?");
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, user.getFullName());
             stmt.setString(2, user.getResidenceHall());
             stmt.setString(3, user.getBio());
             stmt.setString(4, user.getPreferredMeetup());
-            stmt.setString(5, user.getUsername());
+            if (passwordHash == null) {
+                stmt.setString(5, user.getUsername());
+            } else {
+                stmt.setString(5, passwordHash);
+                stmt.setString(6, user.getUsername());
+            }
 
             return stmt.executeUpdate() > 0;
         }
@@ -104,6 +116,7 @@ public class UserRepository {
 
     /** Stores an already hashed password. Authentication and authorization belong to the caller. */
     public boolean updatePasswordHash(String username, String hash) throws SQLException{
+        requireHash(hash);
         String sql = "UPDATE users SET password_hash = ? WHERE username = ?";
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -111,6 +124,26 @@ public class UserRepository {
             stmt.setString(2, username);
 
             return stmt.executeUpdate() > 0;
+        }
+    }
+
+    /** Compare exact bytes, avoiding case-insensitive database collation during migration. */
+    public boolean replacePasswordHash(String username, String previous, String hash) throws SQLException {
+        requireHash(hash);
+        String sql = "UPDATE users SET password_hash = ? WHERE username = ? "
+                + "AND CAST(password_hash AS BINARY) = CAST(? AS BINARY)";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, hash);
+            stmt.setString(2, username);
+            stmt.setString(3, previous);
+            return stmt.executeUpdate() > 0;
+        }
+    }
+
+    private static void requireHash(String hash) {
+        if (!PasswordHasher.isHash(hash)) {
+            throw new IllegalArgumentException("A valid Argon2id password hash is required.");
         }
     }
 

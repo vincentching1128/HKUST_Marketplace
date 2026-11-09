@@ -2,6 +2,7 @@ package com.hkust.marketplace.controllers.buyer;
 
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
+import com.hkust.marketplace.services.PasswordHasher;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -38,8 +39,7 @@ public class BuyerLoginController {
             showError("This account is not a Buyer account. Please use the correct portal.");
             return;
         }
-        // Demo: plaintext comparison. TODO: use hashed password verification
-        if (!user.getPasswordHash().equals(password)) {
+        if (!PasswordHasher.verify(password, user.getPasswordHash())) {
             showError("Incorrect password. Please try again.");
             return;
         }

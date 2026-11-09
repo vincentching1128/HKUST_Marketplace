@@ -433,7 +433,7 @@ public class SellerDashboardController {
             profileUpdate.setBio(bioInfo);
             profileUpdate.setPreferredMeetup(PreferredMeetupLocation);
             try{
-                boolean updated = userRepository.updateProfile(profileUpdate);
+                boolean updated = new AuthService(userRepository).updateProfile(profileUpdate, pass.getText());
                 if (!updated){
                     new Alert(Alert.AlertType.ERROR, "Profile not found").showAndWait();
                     return;
@@ -443,8 +443,14 @@ public class SellerDashboardController {
                 sessionUser.setFullName(fullname);
                 sessionUser.setBio(bioInfo);
                 sessionUser.setPreferredMeetup(PreferredMeetupLocation);
+                if (profileUpdate.getPasswordHash() != null) {
+                    sessionUser.setPasswordHash(profileUpdate.getPasswordHash());
+                }
+                pass.clear();
                 welcomeLabel.setText("Hello, " + sessionUser.getFullName());
                 new Alert(Alert.AlertType.INFORMATION, "profile saved").showAndWait();
+            } catch (IllegalArgumentException invalidPassword){
+                new Alert(Alert.AlertType.WARNING, invalidPassword.getMessage()).showAndWait();
             } catch (SQLException ex){
                 new Alert(Alert.AlertType.ERROR, "Unable to save your profile. please try again. ").showAndWait();
             }

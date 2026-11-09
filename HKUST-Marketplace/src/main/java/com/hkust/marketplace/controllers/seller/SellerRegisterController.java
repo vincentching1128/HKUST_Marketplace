@@ -8,8 +8,10 @@ import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.services.AuthService;
 import java.sql.SQLException;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 public class SellerRegisterController {
 
@@ -61,7 +63,7 @@ public class SellerRegisterController {
         if (!"OK".equals(pwdCheck)) { showError(pwdCheck); return; }
         if (!password.equals(confirm)) { showError("Passwords do not match."); return; }
 
-        User user = new User(username.toLowerCase(), fullName, password, UserRole.SELLER);
+        User user = new User(username.toLowerCase(Locale.ROOT), fullName, null, UserRole.SELLER);
         if (meetup != null) user.setPreferredMeetup(meetup);
         if (!bio.isBlank()) user.setBio(bio);
         try {
@@ -69,7 +71,7 @@ public class SellerRegisterController {
                 showError("Username already taken.");
                 return;
             }
-            userRepository.register(user);
+            new AuthService(userRepository).register(user, password);
 
             showSuccess("Seller account created! You can now login.");
             usernameField.clear(); fullNameField.clear(); passwordField.clear();

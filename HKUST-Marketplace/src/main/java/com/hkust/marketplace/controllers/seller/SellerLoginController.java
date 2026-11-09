@@ -2,7 +2,7 @@ package com.hkust.marketplace.controllers.seller;
 
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
-import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.fxml.FXML;
@@ -15,7 +15,7 @@ import java.util.Locale;
 
 public class SellerLoginController {
 
-    private final UserRepository userRepository = new UserRepository();
+    private final AuthService authService = new AuthService();
 
     @FXML private TextField usernameField;
     @FXML private PasswordField passwordField;
@@ -35,22 +35,17 @@ public class SellerLoginController {
         //login by finding actual user in the database
         User user;
         try {
-            user = userRepository.findByUsername(username);
+            user = authService.authenticate(username, password, UserRole.SELLER);
         } catch (SQLException e) {
             showError("Unable to sign in. Please try again.");
             return;
         }
         if (user == null) {
-            showError("User not found.");
+            showError("Invalid seller credentials or account deactivated.");
             return;
         }
         if (user.getRole() != UserRole.SELLER) {
             showError("This account is not a Seller account. Use the correct portal.");
-            return;
-        }
-        // TODO: Replace the demo comparison with the shared AuthService password verification.
-        if (!user.getPasswordHash().equals(password)) {
-            showError("Incorrect password.");
             return;
         }
         if (!user.isActive()) {

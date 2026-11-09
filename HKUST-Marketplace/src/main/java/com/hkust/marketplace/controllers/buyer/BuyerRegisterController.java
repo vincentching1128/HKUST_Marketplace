@@ -7,6 +7,7 @@ import com.hkust.marketplace.utils.SceneManager;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
+import java.util.Locale;
 
 public class BuyerRegisterController {
 
@@ -60,8 +61,8 @@ public class BuyerRegisterController {
             return;
         }
 
-        // Create user (demo – password stored as-is)
-        User user = new User(username.toLowerCase(), fullName, password, UserRole.BUYER);
+        // The in-memory store hashes the password before retaining the account.
+        User user = new User(username.toLowerCase(Locale.ROOT), fullName, password, UserRole.BUYER);
         if (residence != null) {
             user.setResidenceHall(residence);
         }
