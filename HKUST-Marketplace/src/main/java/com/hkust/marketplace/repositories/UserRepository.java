@@ -131,6 +131,7 @@ public class UserRepository {
         }
     }
 
+
     public List<User> findAll() throws SQLException{
         String sql = "SELECT * FROM users ORDER BY username";
         List<User> users = new ArrayList<>();
@@ -144,6 +145,6 @@ public class UserRepository {
         return users;
     }
 
-
+    //TO BE IMPLEMENTED
 
 }
