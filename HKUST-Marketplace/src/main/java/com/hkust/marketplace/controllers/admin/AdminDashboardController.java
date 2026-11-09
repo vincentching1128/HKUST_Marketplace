@@ -18,8 +18,12 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class AdminDashboardController {
+
+    private static final Logger LOGGER = Logger.getLogger(AdminDashboardController.class.getName());
 
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
@@ -195,8 +199,8 @@ public class AdminDashboardController {
         try {
             allUsers = userRepository.findAll();
         } catch (SQLException ex) {
-            ex.printStackTrace();
-            Label dbError = new Label("Could not load users from the database: " + ex.getMessage());
+            LOGGER.log(Level.SEVERE, "Failed to load users from the database.", ex);
+            Label dbError = new Label("Unable to load users. Please try again.");
             dbError.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
             dbError.setWrapText(true);
             root.getChildren().add(dbError);
@@ -255,7 +259,9 @@ public class AdminDashboardController {
             System.out.println("Toggled @" + u.getUsername() + " -> active=" + newState);
             showUsers(); //re-read from DB so the badge reflects the stored value
         } catch (SQLException ex) {
-            new Alert(Alert.AlertType.ERROR, "Database error: " + ex.getMessage()).showAndWait();
+            LOGGER.log(Level.SEVERE, "Failed to update account status.", ex);
+            new Alert(Alert.AlertType.ERROR,
+                    "Unable to update the account status. Please try again.").showAndWait();
         } catch (IllegalArgumentException ex) {
             new Alert(Alert.AlertType.ERROR, "User not found in database: " + u.getUsername()).showAndWait();
             showUsers(); //refresh in case the row was removed externally
@@ -269,7 +275,9 @@ public class AdminDashboardController {
             new Alert(Alert.AlertType.INFORMATION, "User deactivated (demo safety).").showAndWait();
             showUsers();
         } catch (SQLException ex) {
-            new Alert(Alert.AlertType.ERROR, "Database error: " + ex.getMessage()).showAndWait();
+            LOGGER.log(Level.SEVERE, "Failed to deactivate account.", ex);
+            new Alert(Alert.AlertType.ERROR,
+                    "Unable to update the account status. Please try again.").showAndWait();
         } catch (IllegalArgumentException ex) {
             new Alert(Alert.AlertType.ERROR, "User not found in database: " + u.getUsername()).showAndWait();
             showUsers();
