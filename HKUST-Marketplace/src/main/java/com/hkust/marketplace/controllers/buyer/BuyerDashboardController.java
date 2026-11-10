@@ -4,8 +4,8 @@ import com.hkust.marketplace.models.Listing;
 import com.hkust.marketplace.models.ListingType;
 import com.hkust.marketplace.models.Notification;
 import com.hkust.marketplace.models.User;
+import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.services.AuthService;
-import com.hkust.marketplace.services.PasswordHasher;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -19,9 +19,13 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 
 import java.time.format.DateTimeFormatter;
+import java.sql.SQLException;
 import java.util.List;
 
 public class BuyerDashboardController {
+
+    private final UserRepository userRepository = new UserRepository();
+    private final AuthService authService = new AuthService(userRepository);
 
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
@@ -344,12 +348,24 @@ public class BuyerDashboardController {
         setActive(btnProfile, "Manage Profile");
         contentPane.getChildren().clear();
 
-        User user = SessionManager.getCurrentUser();
-        VBox form = new VBox(14);
-        if (user == null) {
+        User sessionUser = SessionManager.getCurrentUser();
+        if (sessionUser == null) {
             SceneManager.showBuyerLogin();
             return;
         }
+        User user;
+        try {
+            user = userRepository.findByUsername(sessionUser.getUsername());
+        } catch (SQLException e) {
+            new Alert(Alert.AlertType.ERROR, "Unable to load your profile. Please try again.").showAndWait();
+            return;
+        }
+        if (user == null) {
+            SessionManager.logout();
+            SceneManager.showBuyerLogin();
+            return;
+        }
+        VBox form = new VBox(14);
         form.setPadding(new Insets(8));
         form.setMaxWidth(420);
         form.getStyleClass().add("card");
@@ -357,7 +373,7 @@ public class BuyerDashboardController {
         Label title = new Label("Edit your profile");
         title.getStyleClass().add("section-title");
 
-        TextField nameField = new TextField(user != null ? user.getFullName() : "");
+        TextField nameField = new TextField(user.getFullName());
         nameField.setPromptText("Full Name");
         PasswordField newPass = new PasswordField();
         newPass.setPromptText("New password (leave blank to keep)");
@@ -366,7 +382,7 @@ public class BuyerDashboardController {
         ComboBox<String> residence = new ComboBox<>(FXCollections.observableArrayList(
                 "Hall 1", "Hall 2", "Hall 3", "Hall 4", "Hall 5",
                 "Hall 6", "Hall 7", "Hall 8", "Hall 9", "UG Hall 1", "UG Hall 2", "Off-campus"));
-        if (user != null && user.getResidenceHall() != null) {
+        if (user.getResidenceHall() != null) {
             residence.setValue(user.getResidenceHall());
         }
 
@@ -383,22 +399,36 @@ public class BuyerDashboardController {
                 new Alert(Alert.AlertType.WARNING, "Passwords do not match.").showAndWait();
                 return;
             }
-            String hash = null;
-            if (!password.isEmpty()) {
-                String validation = AuthService.checkPasswordStrength(password);
-                if (!"OK".equals(validation)) {
-                    new Alert(Alert.AlertType.WARNING, validation).showAndWait();
+            String selectedResidence = residence.getValue();
+            if (selectedResidence != null && selectedResidence.codePointCount(0, selectedResidence.length()) > 100) {
+                new Alert(Alert.AlertType.WARNING, "Residence must be at most 100 characters.").showAndWait();
+                return;
+            }
+            User profileUpdate = new User();
+            profileUpdate.setUsername(user.getUsername());
+            profileUpdate.setFullName(fullName);
+            profileUpdate.setResidenceHall(selectedResidence);
+            profileUpdate.setBio(user.getBio());
+            profileUpdate.setPreferredMeetup(user.getPreferredMeetup());
+            try {
+                if (!authService.updateProfile(profileUpdate, password)) {
+                    new Alert(Alert.AlertType.ERROR, "Profile not found.").showAndWait();
                     return;
                 }
-                hash = PasswordHasher.hash(password);
+                sessionUser.setFullName(fullName);
+                sessionUser.setResidenceHall(selectedResidence);
+                if (profileUpdate.getPasswordHash() != null) {
+                    sessionUser.setPasswordHash(profileUpdate.getPasswordHash());
+                }
+                newPass.clear();
+                confirmPass.clear();
+                welcomeLabel.setText("Hello, " + fullName);
+                new Alert(Alert.AlertType.INFORMATION, "Profile updated successfully.").showAndWait();
+            } catch (IllegalArgumentException invalidPassword) {
+                new Alert(Alert.AlertType.WARNING, invalidPassword.getMessage()).showAndWait();
+            } catch (SQLException databaseError) {
+                new Alert(Alert.AlertType.ERROR, "Unable to save your profile. Please try again.").showAndWait();
             }
-            user.setFullName(fullName);
-            user.setResidenceHall(residence.getValue());
-            if (hash != null) user.setPasswordHash(hash);
-            newPass.clear();
-            confirmPass.clear();
-            welcomeLabel.setText("Hello, " + fullName);
-            new Alert(Alert.AlertType.INFORMATION, "Profile updated for this demo session.").showAndWait();
         });
 
         form.getChildren().addAll(title,
