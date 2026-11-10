@@ -1,5 +1,7 @@
 package com.hkust.marketplace.models;
 
+
+//allow listings to be lent with units (days/ week / month)
 public enum LendingUnit {
     DAYS("Day", "Days"),
     WEEKS("Week", "Weeks"),
