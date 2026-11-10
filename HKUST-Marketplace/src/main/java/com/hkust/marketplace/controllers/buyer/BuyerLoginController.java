@@ -1,17 +1,18 @@
 package com.hkust.marketplace.controllers.buyer;
 
-import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
-import com.hkust.marketplace.services.PasswordHasher;
-import com.hkust.marketplace.utils.DummyDataService;
+import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
+import java.sql.SQLException;
 
 public class BuyerLoginController {
+
+    private final AuthService authService = new AuthService();
 
     @FXML private TextField usernameField;
     @FXML private PasswordField passwordField;
@@ -30,25 +31,26 @@ public class BuyerLoginController {
             return;
         }
 
-        User user = DummyDataService.getInstance().findUser(username);
-        if (user == null) {
-            showError("User not found. Please check your username.");
+        AuthService.LoginResult result;
+        try {
+            result = authService.login(username, password, UserRole.BUYER);
+        } catch (SQLException e) {
+            showError("Unable to sign in. Please check the database connection and try again.");
             return;
         }
-        if (user.getRole() != UserRole.BUYER) {
-            showError("This account is not a Buyer account. Please use the correct portal.");
-            return;
-        }
-        if (!PasswordHasher.verify(password, user.getPasswordHash())) {
-            showError("Incorrect password. Please try again.");
-            return;
-        }
-        if (!user.isActive()) {
-            showError("This account has been deactivated. Contact admin.");
+        if (result.status() != AuthService.LoginStatus.SUCCESS) {
+            showError(switch (result.status()) {
+                case USER_NOT_FOUND -> "User not found. Please check your username.";
+                case WRONG_ROLE -> "This account is not a Buyer account. Please use the correct portal.";
+                case ACCOUNT_DEACTIVATED -> "This account has been deactivated. Contact admin.";
+                case INCORRECT_PASSWORD -> "Incorrect password. Please try again.";
+                case ACCOUNT_CHANGED -> "Account changed during sign-in. Please try again.";
+                default -> "Please enter a valid username and password.";
+            });
             return;
         }
 
-        SessionManager.login(user);
+        SessionManager.login(result.user());
         SceneManager.showBuyerDashboard();
     }
 
