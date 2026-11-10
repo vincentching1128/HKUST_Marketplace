@@ -16,12 +16,19 @@ import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.PieChart;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
+import javafx.scene.image.Image;
 import javafx.scene.layout.*;
+import javafx.stage.FileChooser;
 
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.ArrayList;
 
 public class SellerDashboardController {
     private final UserRepository userRepository = new UserRepository();
@@ -148,15 +155,64 @@ public class SellerDashboardController {
 
         TextField priceField = new TextField();
         priceField.setPromptText("Price (HK$) – required for Sell");
-        TextField daysField = new TextField();
-        daysField.setPromptText("Lending duration (days) – required for Lend");
+        TextField durationField = new TextField();
+        durationField.setPromptText("Duration – required for Lend");
+        ComboBox<LendingUnit> unitCombo = new ComboBox<>(
+                FXCollections.observableArrayList(LendingUnit.values()));
+        unitCombo.setValue(LendingUnit.DAYS);
+        HBox durationInputs = new HBox(10, durationField, unitCombo);
+        HBox.setHgrow(durationField, Priority.ALWAYS);
+        durationInputs.disableProperty().bind(typeCombo.valueProperty().isNotEqualTo("Lend"));
 
         ComboBox<String> meetupCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
         meetupCombo.setPromptText("Meet-up location *");
         meetupCombo.setMaxWidth(Double.MAX_VALUE);
 
-        Label photoNote = new Label("📷 Photos: up to 6 (UI placeholder – file chooser not wired in demo)");
+        List<byte[]> selectedPhotos = new ArrayList<>();
+        Label photoNote = new Label("0 of 6 photos selected");
         photoNote.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 12px;");
+        Button choosePhotos = new Button("Choose Photos");
+        choosePhotos.getStyleClass().add("btn-outline");
+        choosePhotos.setOnAction(event -> {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("Choose up to 6 listing photos");
+            chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+                    "Images (PNG, JPEG, GIF)", "*.png", "*.jpg", "*.jpeg", "*.gif"));
+            List<File> files = chooser.showOpenMultipleDialog(contentPane.getScene().getWindow());
+            if (files == null) return;
+            if (files.size() > 6) {
+                new Alert(Alert.AlertType.WARNING, "Choose at most six photos.").showAndWait();
+                return;
+            }
+            List<byte[]> images = new ArrayList<>();
+            try {
+                for (File file : files) {
+                    long size = Files.size(file.toPath());
+                    if (size == 0 || size > Listing.MAX_PHOTO_BYTES) {
+                        throw new IOException(file.getName() + ": each photo must be smaller than 16 MiB and not empty.");
+                    }
+                    byte[] imageData = Files.readAllBytes(file.toPath());
+                    if (imageData.length == 0 || imageData.length > Listing.MAX_PHOTO_BYTES
+                            || new Image(new ByteArrayInputStream(imageData)).isError()) {
+                        throw new IOException(file.getName() + ": unable to read a supported image.");
+                    }
+                    images.add(imageData);
+                }
+            } catch (IOException | SecurityException error) {
+                new Alert(Alert.AlertType.ERROR, "Unable to select photos. " + error.getMessage()).showAndWait();
+                return;
+            }
+            selectedPhotos.clear();
+            selectedPhotos.addAll(images);
+            photoNote.setText(selectedPhotos.size() + " of 6 photos selected");
+        });
+        Button clearPhotos = new Button("Clear Photos");
+        clearPhotos.getStyleClass().add("btn-outline");
+        clearPhotos.setOnAction(event -> {
+            selectedPhotos.clear();
+            photoNote.setText("0 of 6 photos selected");
+        });
+        HBox photoButtons = new HBox(10, choosePhotos, clearPhotos);
 
         Button submitBtn = new Button("Submit for Review");
         submitBtn.getStyleClass().add("btn-gold");
@@ -177,6 +233,7 @@ public class SellerDashboardController {
             listing.setSellerUsername(user.getUsername());
             listing.setSellerFullName(user.getFullName());
             listing.setStatus(ListingStatus.PENDING_REVIEW);
+            listing.setPhotos(new ArrayList<>(selectedPhotos));
 
             switch (typeCombo.getValue()) {
                 case "Sell" -> {
@@ -189,9 +246,17 @@ public class SellerDashboardController {
                 }
                 case "Lend" -> {
                     listing.setType(ListingType.LEND);
-                    try { listing.setLendingDays(Integer.parseInt(daysField.getText())); }
-                    catch (Exception ex) {
-                        new Alert(Alert.AlertType.WARNING, "Valid lending days required.").showAndWait();
+                    try {
+                        int duration = Integer.parseInt(durationField.getText().trim());
+                        if (duration <= 0 || unitCombo.getValue() == null) {
+                            new Alert(Alert.AlertType.WARNING,
+                                    "Enter a positive whole-number lending duration and select Days, Weeks, or Months.").showAndWait();
+                            return;
+                        }
+                        listing.setLendingDuration(duration);
+                        listing.setLendingUnit(unitCombo.getValue());
+                    } catch (NumberFormatException ex) {
+                        new Alert(Alert.AlertType.WARNING, "Enter a positive whole-number lending duration.").showAndWait();
                         return;
                     }
                 }
@@ -214,9 +279,9 @@ public class SellerDashboardController {
                 new Label("Condition *"), condCombo,
                 new Label("Description"), descArea,
                 new Label("Price (Sell only)"), priceField,
-                new Label("Lending Days (Lend only)"), daysField,
+                new Label("Lending Duration (Lend only)"), durationInputs,
                 new Label("Meet-up Location *"), meetupCombo,
-                photoNote, submitBtn);
+                new Label("Photos (optional, up to 6)"), photoButtons, photoNote, submitBtn);
 
         ScrollPane scroll = new ScrollPane(form);
         scroll.setFitToWidth(true);

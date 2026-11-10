@@ -184,7 +184,7 @@ public class BuyerDashboardController {
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Borrow Request");
         alert.setHeaderText("Request to borrow: " + listing.getTitle());
-        alert.setContentText("Proposed duration: " + (listing.getLendingDays() != null ? listing.getLendingDays() + " days" : "N/A") +
+        alert.setContentText("Proposed duration: " + listing.getLendingDurationDisplay() +
                 "\n\nSend borrow request to seller?");
         alert.showAndWait().ifPresent(resp -> {
             if (resp == ButtonType.OK) {

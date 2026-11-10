@@ -5,10 +5,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * In-memory listing model.
- * TODO: Persist to database and add photo storage when backend is ready.
+ * Listing details shared by the screens and database repository.
  */
 public class Listing {
+    public static final int MAX_PHOTO_BYTES = 16_777_215; //MySQL MEDIUMBLOB limit per photo
     private String id;
     private String title;
     private String description;
@@ -17,7 +17,8 @@ public class Listing {
     private ListingStatus status;
     private String condition;          // New / Like New / Used / For Parts
     private Double price;              // Only for SELL
-    private Integer lendingDays;       // Only for LEND
+    private Integer lendingDuration;  // Only for LEND
+    private LendingUnit lendingUnit;   // DAYS / WEEKS / MONTHS
     private String meetupLocation;
     private String sellerUsername;
     private String sellerFullName;
@@ -25,7 +26,7 @@ public class Listing {
     private LocalDateTime reviewedAt;
     private String rejectionReason;
     private int viewCount;
-    private List<String> photoPaths = new ArrayList<>(); // Demo: placeholder paths
+    private List<byte[]> photos = new ArrayList<>(); //actual image data, with up to six photos
 
     public Listing() {
         this.postedAt = LocalDateTime.now();
@@ -58,8 +59,23 @@ public class Listing {
     public Double getPrice() { return price; }
     public void setPrice(Double price) { this.price = price; }
 
-    public Integer getLendingDays() { return lendingDays; }
-    public void setLendingDays(Integer lendingDays) { this.lendingDays = lendingDays; }
+    public Integer getLendingDuration() { return lendingDuration; }
+    public void setLendingDuration(Integer lendingDuration) { this.lendingDuration = lendingDuration; }
+
+    //keep the old dummy data working until its listing flow is replaced
+    @Deprecated
+    public void setLendingDays(Integer days) {
+        this.lendingDuration = days;
+        this.lendingUnit = days == null ? null : LendingUnit.DAYS;
+    }
+
+    public LendingUnit getLendingUnit() { return lendingUnit; }
+    public void setLendingUnit(LendingUnit lendingUnit) { this.lendingUnit = lendingUnit; }
+
+    public String getLendingDurationDisplay() {
+        if (lendingDuration == null || lendingUnit == null) return "N/A";
+        return lendingDuration + " " + lendingUnit.getDisplayName(lendingDuration);
+    }
 
     public String getMeetupLocation() { return meetupLocation; }
     public void setMeetupLocation(String meetupLocation) { this.meetupLocation = meetupLocation; }
@@ -82,8 +98,8 @@ public class Listing {
     public int getViewCount() { return viewCount; }
     public void setViewCount(int viewCount) { this.viewCount = viewCount; }
 
-    public List<String> getPhotoPaths() { return photoPaths; }
-    public void setPhotoPaths(List<String> photoPaths) { this.photoPaths = photoPaths; }
+    public List<byte[]> getPhotos() { return photos; }
+    public void setPhotos(List<byte[]> photos) { this.photos = photos; }
 
     public String getPriceDisplay() {
         if (type == ListingType.SELL && price != null) {
