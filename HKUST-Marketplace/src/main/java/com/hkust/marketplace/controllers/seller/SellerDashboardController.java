@@ -128,11 +128,41 @@ public class SellerDashboardController {
 
         Button editBtn = new Button("Edit");
         editBtn.getStyleClass().addAll("btn-outline", "btn-sm");
-        //keep these unavailable until database edits and deletes have ownership checks
-        editBtn.setDisable(true);
+        editBtn.setOnAction(event -> {
+            try {
+                Listing saved = listingService.getListingForEdit(SessionManager.getCurrentUser(), l.getId());
+                showListingForm(saved);
+            } catch (IllegalArgumentException unavailable) {
+                new Alert(Alert.AlertType.WARNING, unavailable.getMessage()).showAndWait();
+            } catch (SQLException failure) {
+                new Alert(Alert.AlertType.ERROR, "Unable to load this listing. Please try again.").showAndWait();
+            }
+        });
         Button delBtn = new Button("Delete");
         delBtn.getStyleClass().addAll("btn-danger", "btn-sm");
-        delBtn.setDisable(true);
+        delBtn.setOnAction(event -> {
+            Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                    "Delete '" + l.getTitle() + "' and its photos? This cannot be undone.", ButtonType.OK, ButtonType.CANCEL);
+            if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
+            try {
+                listingService.deleteListing(SessionManager.getCurrentUser(), l.getId());
+                new Alert(Alert.AlertType.INFORMATION, "Listing deleted.").showAndWait();
+                showMyListings();
+            } catch (IllegalArgumentException unavailable) {
+                new Alert(Alert.AlertType.WARNING, unavailable.getMessage()).showAndWait();
+            } catch (SQLException failure) {
+                new Alert(Alert.AlertType.ERROR, "Unable to delete this listing. Please try again.").showAndWait();
+            }
+        });
+        //the service and repository repeat this check against current data when an action runs
+        boolean protectedStatus = l.getStatus() != ListingStatus.PENDING_REVIEW
+                && l.getStatus() != ListingStatus.LIVE && l.getStatus() != ListingStatus.REJECTED;
+        editBtn.setDisable(protectedStatus);
+        delBtn.setDisable(protectedStatus);
+        if (protectedStatus) {
+            editBtn.setTooltip(new Tooltip("This listing's status does not allow editing."));
+            delBtn.setTooltip(new Tooltip("This listing's status does not allow deletion."));
+        }
 
         row.getChildren().addAll(info, status, editBtn, delBtn);
         return row;
@@ -140,7 +170,13 @@ public class SellerDashboardController {
 
     @FXML
     private void showCreateListing() {
-        setActive(btnCreate, "Create New Listing");
+        showListingForm(null);
+    }
+
+    //use one form for both actions so validation and photo handling stay consistent
+    private void showListingForm(Listing existing) {
+        boolean editing = existing != null;
+        setActive(editing ? btnListings : btnCreate, editing ? "Edit Listing" : "Create New Listing");
         contentPane.getChildren().clear();
 
         VBox form = new VBox(12);
@@ -148,7 +184,7 @@ public class SellerDashboardController {
         form.getStyleClass().add("card");
         form.setPadding(new Insets(20));
 
-        Label title = new Label("Post a new item");
+        Label title = new Label(editing ? "Edit your item" : "Post a new item");
         title.getStyleClass().add("section-title");
 
         ComboBox<String> typeCombo = new ComboBox<>(FXCollections.observableArrayList("Sell", "Lend", "Give Away"));
@@ -247,7 +283,30 @@ public class SellerDashboardController {
         });
         HBox photoButtons = new HBox(10, choosePhotos, clearPhotos);
 
-        Button submitBtn = new Button("Submit for Review");
+        //set the type first because changing it clears inputs that no longer apply
+        if (editing) {
+            typeCombo.setValue(switch (existing.getType()) {
+                case SELL -> "Sell";
+                case LEND -> "Lend";
+                case GIVEAWAY -> "Give Away";
+            });
+            nameField.setText(existing.getTitle());
+            catCombo.setValue(existing.getCategory());
+            condCombo.setValue(existing.getCondition());
+            descArea.setText(existing.getDescription());
+            meetupCombo.setValue(existing.getMeetupLocation());
+            if (existing.getPrice() != null) {
+                priceField.setText(java.math.BigDecimal.valueOf(existing.getPrice()).toPlainString());
+            }
+            if (existing.getLendingDuration() != null) {
+                durationField.setText(existing.getLendingDuration().toString());
+                unitCombo.setValue(existing.getLendingUnit());
+            }
+            selectedPhotos.addAll(existing.getPhotos());
+            refreshPhotoPreviews(selectedPhotos, photoPreviews, photoNote);
+        }
+
+        Button submitBtn = new Button(editing ? "Save Changes" : "Submit for Review");
         submitBtn.getStyleClass().add("btn-gold");
         submitBtn.setOnAction(e -> {
             //show all field problems together so an invalid price is not hidden by a missing field
@@ -328,10 +387,17 @@ public class SellerDashboardController {
                 }
                 default -> listing.setType(ListingType.GIVEAWAY);
             }
+            if (editing) {
+                Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                        "Save changes to '" + existing.getTitle() + "'? The listing will return to Pending Review.",
+                        ButtonType.OK, ButtonType.CANCEL);
+                if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
+            }
             //keep submission disabled while the service validates and saves the listing
             submitBtn.setDisable(true);
             try {
-                listingService.createListing(user, listing);
+                if (editing) listingService.updateListing(user, existing.getId(), listing);
+                else listingService.createListing(user, listing);
             } catch (IllegalArgumentException invalid) {
                 //show the validation message and keep the form values so the seller can fix them
                 new Alert(Alert.AlertType.WARNING, invalid.getMessage()).showAndWait();
@@ -354,6 +420,11 @@ public class SellerDashboardController {
         //choose the listing type first before entering details, selecting photos, or submitting
         VBox listingDetails = new VBox(12);
         listingDetails.disableProperty().bind(typeCombo.valueProperty().isNull());
+        Button cancel = new Button("Cancel");
+        cancel.getStyleClass().add("btn-outline");
+        cancel.setOnAction(event -> showMyListings());
+        HBox formActions = new HBox(10, submitBtn);
+        if (editing) formActions.getChildren().add(cancel);
         listingDetails.getChildren().addAll(
                 new Label("Item Name *"), nameField,
                 new Label("Category *"), catCombo,
@@ -361,7 +432,7 @@ public class SellerDashboardController {
                 new Label("Description *"), descArea,
                 priceInputs, lendingInputs,
                 new Label("Meet-up Location *"), meetupCombo,
-                new Label("Photos (optional, up to 6)"), photoButtons, photoNote, photoPreviews, submitBtn);
+                new Label("Photos (optional, up to 6)"), photoButtons, photoNote, photoPreviews, formActions);
         form.getChildren().addAll(title, new Label("Listing Type *"), typeCombo, listingDetails);
 
         ScrollPane scroll = new ScrollPane(form);

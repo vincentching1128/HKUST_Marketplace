@@ -12,6 +12,7 @@ import java.util.Objects;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import com.hkust.marketplace.utils.DummyDataService;
 
 public class ListingService {
     private final UserRepository userRepository;
@@ -44,6 +45,63 @@ public class ListingService {
 
     //check the form details and seller account before saving a new listing
     public void createListing(User user, Listing listing) throws SQLException {
+        validateListing(listing);
+
+        User current = requireActiveSeller(user);
+        //use the checked seller account and give this listing its own ID
+        listing.setId(UUID.randomUUID().toString());
+        listing.setSellerUsername(current.getUsername());
+        listing.setSellerFullName(current.getFullName());
+        //every new listing starts with no review result and waits for admin approval
+        listing.setStatus(ListingStatus.PENDING_REVIEW);
+        listing.setPostedAt(LocalDateTime.now());
+        listing.setReviewedAt(null);
+        listing.setRejectionReason(null);
+        listing.setViewCount(0);
+        //the repository commits the transaction, or rolls it back if saving fails
+        listingRepository.create(listing);
+    }
+
+    //read the listing through an ownership-filtered query before opening the edit form
+    public Listing getListingForEdit(User user, String id) throws SQLException {
+        User current = requireActiveSeller(user);
+        Listing listing = listingRepository.findByIdAndSeller(id, current.getUsername());
+        if (listing == null) throw new IllegalArgumentException("Listing not found or no longer available to your account.");
+        checkCanChange(listing);
+        return listing;
+    }
+
+    public void updateListing(User user, String id, Listing changes) throws SQLException {
+        User current = requireActiveSeller(user);
+        validateListing(changes);
+        Listing existing = getListingForEdit(user, id);
+        checkCanChange(existing);
+        listingRepository.updateOwned(id, current.getUsername(), changes);
+    }
+
+    public void deleteListing(User user, String id) throws SQLException {
+        User current = requireActiveSeller(user);
+        Listing existing = getListingForEdit(user, id);
+        checkCanChange(existing);
+        listingRepository.deleteOwned(id, current.getUsername());
+    }
+
+    //offers still use the existing in-memory store until the offer flow moves to MySQL
+    private void checkCanChange(Listing listing) {
+        if (!Set.of(ListingStatus.PENDING_REVIEW, ListingStatus.LIVE, ListingStatus.REJECTED)
+                .contains(listing.getStatus())) {
+            throw new IllegalArgumentException("Reserved, completed, or removed listings cannot be edited or deleted.");
+        }
+        boolean activeOffer = DummyDataService.getInstance().getAllDeals().stream()
+                .anyMatch(deal -> Objects.equals(listing.getId(), deal.getListingId())
+                        && ("Pending".equalsIgnoreCase(deal.getStatus())
+                        || "Accepted".equalsIgnoreCase(deal.getStatus())
+                        || "Countered".equalsIgnoreCase(deal.getStatus())));
+        if (activeOffer) throw new IllegalArgumentException("Listings with active offers or requests cannot be edited or deleted.");
+    }
+
+    //creation and editing share the same field rules
+    private void validateListing(Listing listing) {
         if (listing == null) throw new IllegalArgumentException("Listing details are required.");
         if (listing.getType() == null) throw new IllegalArgumentException("Choose a listing type.");
         //trim required text and keep it within the database column limits
@@ -96,19 +154,6 @@ public class ListingService {
             }
         }
 
-        User current = requireActiveSeller(user);
-        //use the checked seller account and give this listing its own ID
-        listing.setId(UUID.randomUUID().toString());
-        listing.setSellerUsername(current.getUsername());
-        listing.setSellerFullName(current.getFullName());
-        //every new listing starts with no review result and waits for admin approval
-        listing.setStatus(ListingStatus.PENDING_REVIEW);
-        listing.setPostedAt(LocalDateTime.now());
-        listing.setReviewedAt(null);
-        listing.setRejectionReason(null);
-        listing.setViewCount(0);
-        //the repository commits the transaction, or rolls it back if saving fails
-        listingRepository.create(listing);
     }
 
     //share the same blank and length checks across the text fields
