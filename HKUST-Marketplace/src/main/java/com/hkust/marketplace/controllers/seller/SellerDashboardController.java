@@ -3,6 +3,7 @@ package com.hkust.marketplace.controllers.seller;
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -17,6 +18,7 @@ import javafx.scene.chart.PieChart;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 
@@ -32,6 +34,7 @@ import java.util.ArrayList;
 
 public class SellerDashboardController {
     private final UserRepository userRepository = new UserRepository();
+    private final ListingService listingService = new ListingService();
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
     @FXML private Label welcomeLabel;
@@ -62,19 +65,26 @@ public class SellerDashboardController {
         VBox root = new VBox(14);
         root.setPadding(new Insets(4));
 
-        User user = SessionManager.getCurrentUser();
-        List<Listing> myListings = DummyDataService.getInstance()
-                .getListingsBySeller(user != null ? user.getUsername() : "");
-
-        if (myListings.isEmpty()) {
-            Label empty = new Label("You have not posted any listings yet.");
-            empty.setStyle("-fx-text-fill: #5a5a7a;");
-            root.getChildren().add(empty);
-        } else {
-            for (Listing l : myListings) {
-                root.getChildren().add(createListingRow(l));
+        //the service checks the account and SQL only returns this seller's listings
+        try {
+            List<Listing> myListings = listingService.getMyListings(SessionManager.getCurrentUser());
+            if (myListings.isEmpty()) {
+                Label empty = new Label("You have not posted any listings yet.");
+                empty.setStyle("-fx-text-fill: #5a5a7a;");
+                root.getChildren().add(empty);
+            } else {
+                for (Listing listing : myListings) root.getChildren().add(createListingRow(listing));
             }
+        } catch (IllegalArgumentException unavailable) {
+            root.getChildren().add(new Label(unavailable.getMessage()));
+        } catch (SQLException failure) {
+            //a failed query should not look like a seller with no listings
+            Label error = new Label("Unable to load your listings. Please try again.");
+            Button retry = new Button("Retry");
+            retry.setOnAction(event -> showMyListings());
+            root.getChildren().addAll(error, retry);
         }
+
         ScrollPane scroll = new ScrollPane(root);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
@@ -90,9 +100,22 @@ public class SellerDashboardController {
         HBox.setHgrow(info, Priority.ALWAYS);
         Label title = new Label(l.getTitle());
         title.setStyle("-fx-font-weight: bold; -fx-font-size: 15px;");
-        Label meta = new Label(l.getCategory() + " · " + l.getTypeDisplay() + " · " + l.getMeetupLocation());
+        Label meta = new Label(l.getCategory() + " | " + l.getTypeDisplay() + " | " + l.getMeetupLocation());
+        meta.setWrapText(true);
         meta.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
-        info.getChildren().addAll(title, meta);
+        String terms = switch (l.getType()) {
+            case SELL -> String.format("HK$ %.2f", l.getPrice());
+            case LEND -> "Lending duration: " + l.getLendingDurationDisplay();
+            case GIVEAWAY -> "Free";
+        };
+        info.getChildren().addAll(title, meta, new Label(terms));
+        //keep the reason next to the listing so the seller knows why it was rejected
+        if (l.getStatus() == ListingStatus.REJECTED && l.getRejectionReason() != null
+                && !l.getRejectionReason().isBlank()) {
+            Label reason = new Label("Rejection reason: " + l.getRejectionReason());
+            reason.setWrapText(true);
+            info.getChildren().add(reason);
+        }
 
         Label status = new Label(l.getStatus().name().replace('_', ' '));
         status.getStyleClass().add("badge");
@@ -105,20 +128,41 @@ public class SellerDashboardController {
 
         Button editBtn = new Button("Edit");
         editBtn.getStyleClass().addAll("btn-outline", "btn-sm");
-        editBtn.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION,
-                "Edit form would open here.\n(Demo placeholder)").showAndWait());
-
+        editBtn.setOnAction(event -> {
+            try {
+                Listing saved = listingService.getListingForEdit(SessionManager.getCurrentUser(), l.getId());
+                showListingForm(saved);
+            } catch (IllegalArgumentException unavailable) {
+                new Alert(Alert.AlertType.WARNING, unavailable.getMessage()).showAndWait();
+            } catch (SQLException failure) {
+                new Alert(Alert.AlertType.ERROR, "Unable to load this listing. Please try again.").showAndWait();
+            }
+        });
         Button delBtn = new Button("Delete");
         delBtn.getStyleClass().addAll("btn-danger", "btn-sm");
-        delBtn.setOnAction(e -> {
-            Alert conf = new Alert(Alert.AlertType.CONFIRMATION, "Delete this listing?");
-            conf.showAndWait().ifPresent(r -> {
-                if (r == ButtonType.OK) {
-                    DummyDataService.getInstance().removeListing(l.getId());
-                    showMyListings();
-                }
-            });
+        delBtn.setOnAction(event -> {
+            Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                    "Delete '" + l.getTitle() + "' and its photos? This cannot be undone.", ButtonType.OK, ButtonType.CANCEL);
+            if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
+            try {
+                listingService.deleteListing(SessionManager.getCurrentUser(), l.getId());
+                new Alert(Alert.AlertType.INFORMATION, "Listing deleted.").showAndWait();
+                showMyListings();
+            } catch (IllegalArgumentException unavailable) {
+                new Alert(Alert.AlertType.WARNING, unavailable.getMessage()).showAndWait();
+            } catch (SQLException failure) {
+                new Alert(Alert.AlertType.ERROR, "Unable to delete this listing. Please try again.").showAndWait();
+            }
         });
+        //the service and repository repeat this check against current data when an action runs
+        boolean protectedStatus = l.getStatus() != ListingStatus.PENDING_REVIEW
+                && l.getStatus() != ListingStatus.LIVE && l.getStatus() != ListingStatus.REJECTED;
+        editBtn.setDisable(protectedStatus);
+        delBtn.setDisable(protectedStatus);
+        if (protectedStatus) {
+            editBtn.setTooltip(new Tooltip("This listing's status does not allow editing."));
+            delBtn.setTooltip(new Tooltip("This listing's status does not allow deletion."));
+        }
 
         row.getChildren().addAll(info, status, editBtn, delBtn);
         return row;
@@ -126,7 +170,13 @@ public class SellerDashboardController {
 
     @FXML
     private void showCreateListing() {
-        setActive(btnCreate, "Create New Listing");
+        showListingForm(null);
+    }
+
+    //use one form for both actions so validation and photo handling stay consistent
+    private void showListingForm(Listing existing) {
+        boolean editing = existing != null;
+        setActive(editing ? btnListings : btnCreate, editing ? "Edit Listing" : "Create New Listing");
         contentPane.getChildren().clear();
 
         VBox form = new VBox(12);
@@ -134,7 +184,7 @@ public class SellerDashboardController {
         form.getStyleClass().add("card");
         form.setPadding(new Insets(20));
 
-        Label title = new Label("Post a new item");
+        Label title = new Label(editing ? "Edit your item" : "Post a new item");
         title.getStyleClass().add("section-title");
 
         ComboBox<String> typeCombo = new ComboBox<>(FXCollections.observableArrayList("Sell", "Lend", "Give Away"));
@@ -150,19 +200,36 @@ public class SellerDashboardController {
         condCombo.setPromptText("Condition *");
         condCombo.setMaxWidth(Double.MAX_VALUE);
         TextArea descArea = new TextArea();
-        descArea.setPromptText("Description");
+        descArea.setPromptText("Description *");
         descArea.setPrefRowCount(3);
 
         TextField priceField = new TextField();
-        priceField.setPromptText("Price (HK$) – required for Sell");
+        priceField.setPromptText("Price (HK$)");
+        //show the price label and input only when the seller chooses Sell
+        VBox priceInputs = new VBox(6, new Label("Price"), priceField);
+        priceInputs.visibleProperty().bind(typeCombo.valueProperty().isEqualTo("Sell"));
+        priceInputs.managedProperty().bind(priceInputs.visibleProperty());
+        priceField.disableProperty().bind(typeCombo.valueProperty().isNotEqualTo("Sell"));
         TextField durationField = new TextField();
-        durationField.setPromptText("Duration – required for Lend");
+        durationField.setPromptText("Duration");
         ComboBox<LendingUnit> unitCombo = new ComboBox<>(
                 FXCollections.observableArrayList(LendingUnit.values()));
         unitCombo.setValue(LendingUnit.DAYS);
         HBox durationInputs = new HBox(10, durationField, unitCombo);
         HBox.setHgrow(durationField, Priority.ALWAYS);
         durationInputs.disableProperty().bind(typeCombo.valueProperty().isNotEqualTo("Lend"));
+        //hide the lending label, duration, and unit together for other listing types
+        VBox lendingInputs = new VBox(6, new Label("Lending Duration"), durationInputs);
+        lendingInputs.visibleProperty().bind(typeCombo.valueProperty().isEqualTo("Lend"));
+        lendingInputs.managedProperty().bind(lendingInputs.visibleProperty());
+        //discard values that no longer apply when the seller changes the listing type
+        typeCombo.valueProperty().addListener((observable, oldType, newType) -> {
+            if (!"Sell".equals(newType)) priceField.clear();
+            if (!"Lend".equals(newType)) {
+                durationField.clear();
+                unitCombo.setValue(LendingUnit.DAYS);
+            }
+        });
 
         ComboBox<String> meetupCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
         meetupCombo.setPromptText("Meet-up location *");
@@ -171,6 +238,7 @@ public class SellerDashboardController {
         List<byte[]> selectedPhotos = new ArrayList<>();
         Label photoNote = new Label("0 of 6 photos selected");
         photoNote.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 12px;");
+        FlowPane photoPreviews = new FlowPane(10, 10);
         Button choosePhotos = new Button("Choose Photos");
         choosePhotos.getStyleClass().add("btn-outline");
         choosePhotos.setOnAction(event -> {
@@ -180,8 +248,9 @@ public class SellerDashboardController {
                     "Images (PNG, JPEG, GIF)", "*.png", "*.jpg", "*.jpeg", "*.gif"));
             List<File> files = chooser.showOpenMultipleDialog(contentPane.getScene().getWindow());
             if (files == null) return;
-            if (files.size() > 6) {
-                new Alert(Alert.AlertType.WARNING, "Choose at most six photos.").showAndWait();
+            //new selections are added to the photos already chosen
+            if (selectedPhotos.size() + files.size() > 6) {
+                new Alert(Alert.AlertType.WARNING, "A listing can have at most six photos. Remove a photo before adding more.").showAndWait();
                 return;
             }
             List<byte[]> images = new ArrayList<>();
@@ -193,7 +262,7 @@ public class SellerDashboardController {
                     }
                     byte[] imageData = Files.readAllBytes(file.toPath());
                     if (imageData.length == 0 || imageData.length > Listing.MAX_PHOTO_BYTES
-                            || new Image(new ByteArrayInputStream(imageData)).isError()) {
+                            || new Image(new ByteArrayInputStream(imageData), 160, 120, true, true).isError()) {
                         throw new IOException(file.getName() + ": unable to read a supported image.");
                     }
                     images.add(imageData);
@@ -202,27 +271,85 @@ public class SellerDashboardController {
                 new Alert(Alert.AlertType.ERROR, "Unable to select photos. " + error.getMessage()).showAndWait();
                 return;
             }
-            selectedPhotos.clear();
+            //only add this selection after every chosen file has passed validation
             selectedPhotos.addAll(images);
-            photoNote.setText(selectedPhotos.size() + " of 6 photos selected");
+            refreshPhotoPreviews(selectedPhotos, photoPreviews, photoNote);
         });
         Button clearPhotos = new Button("Clear Photos");
         clearPhotos.getStyleClass().add("btn-outline");
         clearPhotos.setOnAction(event -> {
             selectedPhotos.clear();
-            photoNote.setText("0 of 6 photos selected");
+            refreshPhotoPreviews(selectedPhotos, photoPreviews, photoNote);
         });
         HBox photoButtons = new HBox(10, choosePhotos, clearPhotos);
 
-        Button submitBtn = new Button("Submit for Review");
+        //set the type first because changing it clears inputs that no longer apply
+        if (editing) {
+            typeCombo.setValue(switch (existing.getType()) {
+                case SELL -> "Sell";
+                case LEND -> "Lend";
+                case GIVEAWAY -> "Give Away";
+            });
+            nameField.setText(existing.getTitle());
+            catCombo.setValue(existing.getCategory());
+            condCombo.setValue(existing.getCondition());
+            descArea.setText(existing.getDescription());
+            meetupCombo.setValue(existing.getMeetupLocation());
+            if (existing.getPrice() != null) {
+                priceField.setText(java.math.BigDecimal.valueOf(existing.getPrice()).toPlainString());
+            }
+            if (existing.getLendingDuration() != null) {
+                durationField.setText(existing.getLendingDuration().toString());
+                unitCombo.setValue(existing.getLendingUnit());
+            }
+            selectedPhotos.addAll(existing.getPhotos());
+            refreshPhotoPreviews(selectedPhotos, photoPreviews, photoNote);
+        }
+
+        Button submitBtn = new Button(editing ? "Save Changes" : "Submit for Review");
         submitBtn.getStyleClass().add("btn-gold");
         submitBtn.setOnAction(e -> {
-            if (typeCombo.getValue() == null || nameField.getText().isBlank() ||
-                    catCombo.getValue() == null || condCombo.getValue() == null ||
-                    meetupCombo.getValue() == null) {
-                new Alert(Alert.AlertType.WARNING, "Please fill all required fields.").showAndWait();
+            //show all field problems together so an invalid price is not hidden by a missing field
+            List<String> errors = new ArrayList<>();
+            if (typeCombo.getValue() == null) errors.add("Choose a listing type.");
+            if (nameField.getText().isBlank()) errors.add("Item name is required.");
+            if (catCombo.getValue() == null) errors.add("Choose a category.");
+            if (condCombo.getValue() == null) errors.add("Choose an item condition.");
+            if (descArea.getText().isBlank()) errors.add("Description is required.");
+            if (meetupCombo.getValue() == null) errors.add("Choose a meet-up location.");
+            if ("Sell".equals(typeCombo.getValue())) {
+                if (priceField.getText().isBlank()) {
+                    errors.add("Price is required.");
+                } else {
+                    try {
+                        double price = Double.parseDouble(priceField.getText().trim());
+                        if (!Double.isFinite(price) || price <= 0) {
+                            errors.add("Price must be a positive number.");
+                        } else if (price > 99_999_999.99) {
+                            errors.add("Price must not exceed HK$99,999,999.99.");
+                        } else if (java.math.BigDecimal.valueOf(price).stripTrailingZeros().scale() > 2) {
+                            errors.add("Price must have at most two decimal places.");
+                        }
+                    } catch (NumberFormatException invalidPrice) {
+                        errors.add("Enter a valid number for price.");
+                    }
+                }
+            }
+            if ("Lend".equals(typeCombo.getValue())) {
+                try {
+                    if (Integer.parseInt(durationField.getText().trim()) <= 0) {
+                        errors.add("Lending duration must be a positive whole number.");
+                    }
+                } catch (NumberFormatException invalidDuration) {
+                    errors.add("Enter a positive whole number for lending duration.");
+                }
+                if (unitCombo.getValue() == null) errors.add("Choose a lending unit.");
+            }
+            if (!errors.isEmpty()) {
+                new Alert(Alert.AlertType.WARNING, String.join("\n", errors)).showAndWait();
                 return;
             }
+            //collect the form values; the service assigns the seller and review status
             User user = SessionManager.getCurrentUser();
             Listing listing = new Listing();
             listing.setTitle(nameField.getText().trim());
@@ -230,16 +357,14 @@ public class SellerDashboardController {
             listing.setCategory(catCombo.getValue());
             listing.setCondition(condCombo.getValue());
             listing.setMeetupLocation(meetupCombo.getValue());
-            listing.setSellerUsername(user.getUsername());
-            listing.setSellerFullName(user.getFullName());
-            listing.setStatus(ListingStatus.PENDING_REVIEW);
             listing.setPhotos(new ArrayList<>(selectedPhotos));
 
+            //convert text inputs to numbers before passing them to the service
             switch (typeCombo.getValue()) {
                 case "Sell" -> {
                     listing.setType(ListingType.SELL);
-                    try { listing.setPrice(Double.parseDouble(priceField.getText())); }
-                    catch (Exception ex) {
+                    try { listing.setPrice(Double.parseDouble(priceField.getText().trim())); }
+                    catch (NumberFormatException ex) {
                         new Alert(Alert.AlertType.WARNING, "Valid price required for Sell listings.").showAndWait();
                         return;
                     }
@@ -262,30 +387,80 @@ public class SellerDashboardController {
                 }
                 default -> listing.setType(ListingType.GIVEAWAY);
             }
-            DummyDataService.getInstance().addListing(listing);
-            // Notify admin
-            DummyDataService.getInstance().addNotification(new Notification(
-                    "admin", "New Listing Submitted",
-                    user.getFullName() + " submitted '" + listing.getTitle() + "' for review.", "System"));
+            if (editing) {
+                Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                        "Save changes to '" + existing.getTitle() + "'? The listing will return to Pending Review.",
+                        ButtonType.OK, ButtonType.CANCEL);
+                if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
+            }
+            //keep submission disabled while the service validates and saves the listing
+            submitBtn.setDisable(true);
+            try {
+                if (editing) listingService.updateListing(user, existing.getId(), listing);
+                else listingService.createListing(user, listing);
+            } catch (IllegalArgumentException invalid) {
+                //show the validation message and keep the form values so the seller can fix them
+                new Alert(Alert.AlertType.WARNING, invalid.getMessage()).showAndWait();
+                return;
+            } catch (SQLException failure) {
+                //keep the form filled in when the database save fails
+                new Alert(Alert.AlertType.ERROR,
+                        "Unable to save your listing. Please try again.").showAndWait();
+                return;
+            } finally {
+                //allow another attempt even if validation or saving failed
+                submitBtn.setDisable(false);
+            }
+            //only report success after the repository has committed the save
             new Alert(Alert.AlertType.INFORMATION,
-                    "Listing submitted! Status: Pending Review.\nAdmin will review shortly.\n(Demo – in-memory only)").showAndWait();
-            showMyListings();
+                    "Listing saved! Status: Pending Review.").showAndWait();
+            showMyListings(); //show the saved listing from MySQL after submission
         });
 
-        form.getChildren().addAll(title,
-                new Label("Listing Type *"), typeCombo,
+        //choose the listing type first before entering details, selecting photos, or submitting
+        VBox listingDetails = new VBox(12);
+        listingDetails.disableProperty().bind(typeCombo.valueProperty().isNull());
+        Button cancel = new Button("Cancel");
+        cancel.getStyleClass().add("btn-outline");
+        cancel.setOnAction(event -> showMyListings());
+        HBox formActions = new HBox(10, submitBtn);
+        if (editing) formActions.getChildren().add(cancel);
+        listingDetails.getChildren().addAll(
                 new Label("Item Name *"), nameField,
                 new Label("Category *"), catCombo,
                 new Label("Condition *"), condCombo,
-                new Label("Description"), descArea,
-                new Label("Price (Sell only)"), priceField,
-                new Label("Lending Duration (Lend only)"), durationInputs,
+                new Label("Description *"), descArea,
+                priceInputs, lendingInputs,
                 new Label("Meet-up Location *"), meetupCombo,
-                new Label("Photos (optional, up to 6)"), photoButtons, photoNote, submitBtn);
+                new Label("Photos (optional, up to 6)"), photoButtons, photoNote, photoPreviews, formActions);
+        form.getChildren().addAll(title, new Label("Listing Type *"), typeCombo, listingDetails);
 
         ScrollPane scroll = new ScrollPane(form);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
+    }
+
+    //rebuild the thumbnails after adding or removing photos, keeping their saved order
+    private void refreshPhotoPreviews(List<byte[]> photos, FlowPane previews, Label note) {
+        previews.getChildren().clear();
+        note.setText(photos.size() + " of 6 photos selected");
+        for (int i = 0; i < photos.size(); i++) {
+            int photoIndex = i;
+            Image image = new Image(new ByteArrayInputStream(photos.get(i)), 160, 120, true, true);
+            ImageView thumbnail = new ImageView(image);
+            thumbnail.setFitWidth(160);
+            thumbnail.setFitHeight(120);
+            thumbnail.setPreserveRatio(true);
+            Button remove = new Button("Remove");
+            remove.getStyleClass().addAll("btn-outline", "btn-sm");
+            remove.setOnAction(event -> {
+                photos.remove(photoIndex);
+                refreshPhotoPreviews(photos, previews, note);
+            });
+            VBox preview = new VBox(6, new Label("Photo " + (i + 1)), thumbnail, remove);
+            preview.setAlignment(Pos.CENTER);
+            previews.getChildren().add(preview);
+        }
     }
 
     @FXML
