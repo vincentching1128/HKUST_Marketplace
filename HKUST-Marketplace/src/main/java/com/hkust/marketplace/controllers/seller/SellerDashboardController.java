@@ -3,6 +3,7 @@ package com.hkust.marketplace.controllers.seller;
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -32,6 +33,7 @@ import java.util.ArrayList;
 
 public class SellerDashboardController {
     private final UserRepository userRepository = new UserRepository();
+    private final ListingService listingService = new ListingService();
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
     @FXML private Label welcomeLabel;
@@ -150,19 +152,36 @@ public class SellerDashboardController {
         condCombo.setPromptText("Condition *");
         condCombo.setMaxWidth(Double.MAX_VALUE);
         TextArea descArea = new TextArea();
-        descArea.setPromptText("Description");
+        descArea.setPromptText("Description *");
         descArea.setPrefRowCount(3);
 
         TextField priceField = new TextField();
-        priceField.setPromptText("Price (HK$) – required for Sell");
+        priceField.setPromptText("Price (HK$)");
+        //show the price label and input only when the seller chooses Sell
+        VBox priceInputs = new VBox(6, new Label("Price"), priceField);
+        priceInputs.visibleProperty().bind(typeCombo.valueProperty().isEqualTo("Sell"));
+        priceInputs.managedProperty().bind(priceInputs.visibleProperty());
+        priceField.disableProperty().bind(typeCombo.valueProperty().isNotEqualTo("Sell"));
         TextField durationField = new TextField();
-        durationField.setPromptText("Duration – required for Lend");
+        durationField.setPromptText("Duration");
         ComboBox<LendingUnit> unitCombo = new ComboBox<>(
                 FXCollections.observableArrayList(LendingUnit.values()));
         unitCombo.setValue(LendingUnit.DAYS);
         HBox durationInputs = new HBox(10, durationField, unitCombo);
         HBox.setHgrow(durationField, Priority.ALWAYS);
         durationInputs.disableProperty().bind(typeCombo.valueProperty().isNotEqualTo("Lend"));
+        //hide the lending label, duration, and unit together for other listing types
+        VBox lendingInputs = new VBox(6, new Label("Lending Duration"), durationInputs);
+        lendingInputs.visibleProperty().bind(typeCombo.valueProperty().isEqualTo("Lend"));
+        lendingInputs.managedProperty().bind(lendingInputs.visibleProperty());
+        //discard values that no longer apply when the seller changes the listing type
+        typeCombo.valueProperty().addListener((observable, oldType, newType) -> {
+            if (!"Sell".equals(newType)) priceField.clear();
+            if (!"Lend".equals(newType)) {
+                durationField.clear();
+                unitCombo.setValue(LendingUnit.DAYS);
+            }
+        });
 
         ComboBox<String> meetupCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
         meetupCombo.setPromptText("Meet-up location *");
@@ -217,12 +236,47 @@ public class SellerDashboardController {
         Button submitBtn = new Button("Submit for Review");
         submitBtn.getStyleClass().add("btn-gold");
         submitBtn.setOnAction(e -> {
-            if (typeCombo.getValue() == null || nameField.getText().isBlank() ||
-                    catCombo.getValue() == null || condCombo.getValue() == null ||
-                    meetupCombo.getValue() == null) {
-                new Alert(Alert.AlertType.WARNING, "Please fill all required fields.").showAndWait();
+            //show all field problems together so an invalid price is not hidden by a missing field
+            List<String> errors = new ArrayList<>();
+            if (typeCombo.getValue() == null) errors.add("Choose a listing type.");
+            if (nameField.getText().isBlank()) errors.add("Item name is required.");
+            if (catCombo.getValue() == null) errors.add("Choose a category.");
+            if (condCombo.getValue() == null) errors.add("Choose an item condition.");
+            if (descArea.getText().isBlank()) errors.add("Description is required.");
+            if (meetupCombo.getValue() == null) errors.add("Choose a meet-up location.");
+            if ("Sell".equals(typeCombo.getValue())) {
+                if (priceField.getText().isBlank()) {
+                    errors.add("Price is required.");
+                } else {
+                    try {
+                        double price = Double.parseDouble(priceField.getText().trim());
+                        if (!Double.isFinite(price) || price <= 0) {
+                            errors.add("Price must be a positive number.");
+                        } else if (price > 99_999_999.99) {
+                            errors.add("Price must not exceed HK$99,999,999.99.");
+                        } else if (java.math.BigDecimal.valueOf(price).stripTrailingZeros().scale() > 2) {
+                            errors.add("Price must have at most two decimal places.");
+                        }
+                    } catch (NumberFormatException invalidPrice) {
+                        errors.add("Enter a valid number for price.");
+                    }
+                }
+            }
+            if ("Lend".equals(typeCombo.getValue())) {
+                try {
+                    if (Integer.parseInt(durationField.getText().trim()) <= 0) {
+                        errors.add("Lending duration must be a positive whole number.");
+                    }
+                } catch (NumberFormatException invalidDuration) {
+                    errors.add("Enter a positive whole number for lending duration.");
+                }
+                if (unitCombo.getValue() == null) errors.add("Choose a lending unit.");
+            }
+            if (!errors.isEmpty()) {
+                new Alert(Alert.AlertType.WARNING, String.join("\n", errors)).showAndWait();
                 return;
             }
+            //collect the form values; the service assigns the seller and review status
             User user = SessionManager.getCurrentUser();
             Listing listing = new Listing();
             listing.setTitle(nameField.getText().trim());
@@ -230,16 +284,14 @@ public class SellerDashboardController {
             listing.setCategory(catCombo.getValue());
             listing.setCondition(condCombo.getValue());
             listing.setMeetupLocation(meetupCombo.getValue());
-            listing.setSellerUsername(user.getUsername());
-            listing.setSellerFullName(user.getFullName());
-            listing.setStatus(ListingStatus.PENDING_REVIEW);
             listing.setPhotos(new ArrayList<>(selectedPhotos));
 
+            //convert text inputs to numbers before passing them to the service
             switch (typeCombo.getValue()) {
                 case "Sell" -> {
                     listing.setType(ListingType.SELL);
-                    try { listing.setPrice(Double.parseDouble(priceField.getText())); }
-                    catch (Exception ex) {
+                    try { listing.setPrice(Double.parseDouble(priceField.getText().trim())); }
+                    catch (NumberFormatException ex) {
                         new Alert(Alert.AlertType.WARNING, "Valid price required for Sell listings.").showAndWait();
                         return;
                     }
@@ -262,14 +314,27 @@ public class SellerDashboardController {
                 }
                 default -> listing.setType(ListingType.GIVEAWAY);
             }
-            DummyDataService.getInstance().addListing(listing);
-            // Notify admin
-            DummyDataService.getInstance().addNotification(new Notification(
-                    "admin", "New Listing Submitted",
-                    user.getFullName() + " submitted '" + listing.getTitle() + "' for review.", "System"));
+            //keep submission disabled while the service validates and saves the listing
+            submitBtn.setDisable(true);
+            try {
+                listingService.createListing(user, listing);
+            } catch (IllegalArgumentException invalid) {
+                //show the validation message and keep the form values so the seller can fix them
+                new Alert(Alert.AlertType.WARNING, invalid.getMessage()).showAndWait();
+                return;
+            } catch (SQLException failure) {
+                //keep the form filled in when the database save fails
+                new Alert(Alert.AlertType.ERROR,
+                        "Unable to save your listing. Please try again.").showAndWait();
+                return;
+            } finally {
+                //allow another attempt even if validation or saving failed
+                submitBtn.setDisable(false);
+            }
+            //only report success after the repository has committed the save
             new Alert(Alert.AlertType.INFORMATION,
-                    "Listing submitted! Status: Pending Review.\nAdmin will review shortly.\n(Demo – in-memory only)").showAndWait();
-            showMyListings();
+                    "Listing saved! Status: Pending Review.").showAndWait();
+            showCreateListing(); //reset the form after a successful submission
         });
 
         form.getChildren().addAll(title,
@@ -277,9 +342,8 @@ public class SellerDashboardController {
                 new Label("Item Name *"), nameField,
                 new Label("Category *"), catCombo,
                 new Label("Condition *"), condCombo,
-                new Label("Description"), descArea,
-                new Label("Price (Sell only)"), priceField,
-                new Label("Lending Duration (Lend only)"), durationInputs,
+                new Label("Description *"), descArea,
+                priceInputs, lendingInputs,
                 new Label("Meet-up Location *"), meetupCombo,
                 new Label("Photos (optional, up to 6)"), photoButtons, photoNote, submitBtn);
 
