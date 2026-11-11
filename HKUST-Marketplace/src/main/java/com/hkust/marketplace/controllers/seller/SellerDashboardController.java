@@ -18,6 +18,7 @@ import javafx.scene.chart.PieChart;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 
@@ -190,6 +191,7 @@ public class SellerDashboardController {
         List<byte[]> selectedPhotos = new ArrayList<>();
         Label photoNote = new Label("0 of 6 photos selected");
         photoNote.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 12px;");
+        FlowPane photoPreviews = new FlowPane(10, 10);
         Button choosePhotos = new Button("Choose Photos");
         choosePhotos.getStyleClass().add("btn-outline");
         choosePhotos.setOnAction(event -> {
@@ -199,8 +201,9 @@ public class SellerDashboardController {
                     "Images (PNG, JPEG, GIF)", "*.png", "*.jpg", "*.jpeg", "*.gif"));
             List<File> files = chooser.showOpenMultipleDialog(contentPane.getScene().getWindow());
             if (files == null) return;
-            if (files.size() > 6) {
-                new Alert(Alert.AlertType.WARNING, "Choose at most six photos.").showAndWait();
+            //new selections are added to the photos already chosen
+            if (selectedPhotos.size() + files.size() > 6) {
+                new Alert(Alert.AlertType.WARNING, "A listing can have at most six photos. Remove a photo before adding more.").showAndWait();
                 return;
             }
             List<byte[]> images = new ArrayList<>();
@@ -212,7 +215,7 @@ public class SellerDashboardController {
                     }
                     byte[] imageData = Files.readAllBytes(file.toPath());
                     if (imageData.length == 0 || imageData.length > Listing.MAX_PHOTO_BYTES
-                            || new Image(new ByteArrayInputStream(imageData)).isError()) {
+                            || new Image(new ByteArrayInputStream(imageData), 160, 120, true, true).isError()) {
                         throw new IOException(file.getName() + ": unable to read a supported image.");
                     }
                     images.add(imageData);
@@ -221,15 +224,15 @@ public class SellerDashboardController {
                 new Alert(Alert.AlertType.ERROR, "Unable to select photos. " + error.getMessage()).showAndWait();
                 return;
             }
-            selectedPhotos.clear();
+            //only add this selection after every chosen file has passed validation
             selectedPhotos.addAll(images);
-            photoNote.setText(selectedPhotos.size() + " of 6 photos selected");
+            refreshPhotoPreviews(selectedPhotos, photoPreviews, photoNote);
         });
         Button clearPhotos = new Button("Clear Photos");
         clearPhotos.getStyleClass().add("btn-outline");
         clearPhotos.setOnAction(event -> {
             selectedPhotos.clear();
-            photoNote.setText("0 of 6 photos selected");
+            refreshPhotoPreviews(selectedPhotos, photoPreviews, photoNote);
         });
         HBox photoButtons = new HBox(10, choosePhotos, clearPhotos);
 
@@ -345,11 +348,34 @@ public class SellerDashboardController {
                 new Label("Description *"), descArea,
                 priceInputs, lendingInputs,
                 new Label("Meet-up Location *"), meetupCombo,
-                new Label("Photos (optional, up to 6)"), photoButtons, photoNote, submitBtn);
+                new Label("Photos (optional, up to 6)"), photoButtons, photoNote, photoPreviews, submitBtn);
 
         ScrollPane scroll = new ScrollPane(form);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
+    }
+
+    //rebuild the thumbnails after adding or removing photos, keeping their saved order
+    private void refreshPhotoPreviews(List<byte[]> photos, FlowPane previews, Label note) {
+        previews.getChildren().clear();
+        note.setText(photos.size() + " of 6 photos selected");
+        for (int i = 0; i < photos.size(); i++) {
+            int photoIndex = i;
+            Image image = new Image(new ByteArrayInputStream(photos.get(i)), 160, 120, true, true);
+            ImageView thumbnail = new ImageView(image);
+            thumbnail.setFitWidth(160);
+            thumbnail.setFitHeight(120);
+            thumbnail.setPreserveRatio(true);
+            Button remove = new Button("Remove");
+            remove.getStyleClass().addAll("btn-outline", "btn-sm");
+            remove.setOnAction(event -> {
+                photos.remove(photoIndex);
+                refreshPhotoPreviews(photos, previews, note);
+            });
+            VBox preview = new VBox(6, new Label("Photo " + (i + 1)), thumbnail, remove);
+            preview.setAlignment(Pos.CENTER);
+            previews.getChildren().add(preview);
+        }
     }
 
     @FXML

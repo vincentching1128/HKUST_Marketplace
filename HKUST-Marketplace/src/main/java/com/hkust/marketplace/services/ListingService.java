@@ -67,6 +67,18 @@ public class ListingService {
             listing.setLendingUnit(null);
         }
 
+        //photos are optional, but any supplied data must fit the six MEDIUMBLOB rows
+        if (listing.getPhotos() != null) {
+            if (listing.getPhotos().size() > 6) {
+                throw new IllegalArgumentException("A listing can have at most six photos.");
+            }
+            for (byte[] photo : listing.getPhotos()) {
+                if (photo == null || photo.length == 0 || photo.length > Listing.MAX_PHOTO_BYTES) {
+                    throw new IllegalArgumentException("Each photo must be nonempty and smaller than 16 MiB.");
+                }
+            }
+        }
+
         //read the account again in case it was disabled or its role changed after login
         User current = user == null || user.getUsername() == null
                 ? null : userRepository.findByUsername(user.getUsername());
