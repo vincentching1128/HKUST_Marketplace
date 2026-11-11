@@ -65,19 +65,26 @@ public class SellerDashboardController {
         VBox root = new VBox(14);
         root.setPadding(new Insets(4));
 
-        User user = SessionManager.getCurrentUser();
-        List<Listing> myListings = DummyDataService.getInstance()
-                .getListingsBySeller(user != null ? user.getUsername() : "");
-
-        if (myListings.isEmpty()) {
-            Label empty = new Label("You have not posted any listings yet.");
-            empty.setStyle("-fx-text-fill: #5a5a7a;");
-            root.getChildren().add(empty);
-        } else {
-            for (Listing l : myListings) {
-                root.getChildren().add(createListingRow(l));
+        //the service checks the account and SQL only returns this seller's listings
+        try {
+            List<Listing> myListings = listingService.getMyListings(SessionManager.getCurrentUser());
+            if (myListings.isEmpty()) {
+                Label empty = new Label("You have not posted any listings yet.");
+                empty.setStyle("-fx-text-fill: #5a5a7a;");
+                root.getChildren().add(empty);
+            } else {
+                for (Listing listing : myListings) root.getChildren().add(createListingRow(listing));
             }
+        } catch (IllegalArgumentException unavailable) {
+            root.getChildren().add(new Label(unavailable.getMessage()));
+        } catch (SQLException failure) {
+            //a failed query should not look like a seller with no listings
+            Label error = new Label("Unable to load your listings. Please try again.");
+            Button retry = new Button("Retry");
+            retry.setOnAction(event -> showMyListings());
+            root.getChildren().addAll(error, retry);
         }
+
         ScrollPane scroll = new ScrollPane(root);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
@@ -93,9 +100,22 @@ public class SellerDashboardController {
         HBox.setHgrow(info, Priority.ALWAYS);
         Label title = new Label(l.getTitle());
         title.setStyle("-fx-font-weight: bold; -fx-font-size: 15px;");
-        Label meta = new Label(l.getCategory() + " · " + l.getTypeDisplay() + " · " + l.getMeetupLocation());
+        Label meta = new Label(l.getCategory() + " | " + l.getTypeDisplay() + " | " + l.getMeetupLocation());
+        meta.setWrapText(true);
         meta.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
-        info.getChildren().addAll(title, meta);
+        String terms = switch (l.getType()) {
+            case SELL -> String.format("HK$ %.2f", l.getPrice());
+            case LEND -> "Lending duration: " + l.getLendingDurationDisplay();
+            case GIVEAWAY -> "Free";
+        };
+        info.getChildren().addAll(title, meta, new Label(terms));
+        //keep the reason next to the listing so the seller knows why it was rejected
+        if (l.getStatus() == ListingStatus.REJECTED && l.getRejectionReason() != null
+                && !l.getRejectionReason().isBlank()) {
+            Label reason = new Label("Rejection reason: " + l.getRejectionReason());
+            reason.setWrapText(true);
+            info.getChildren().add(reason);
+        }
 
         Label status = new Label(l.getStatus().name().replace('_', ' '));
         status.getStyleClass().add("badge");
@@ -108,20 +128,11 @@ public class SellerDashboardController {
 
         Button editBtn = new Button("Edit");
         editBtn.getStyleClass().addAll("btn-outline", "btn-sm");
-        editBtn.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION,
-                "Edit form would open here.\n(Demo placeholder)").showAndWait());
-
+        //keep these unavailable until database edits and deletes have ownership checks
+        editBtn.setDisable(true);
         Button delBtn = new Button("Delete");
         delBtn.getStyleClass().addAll("btn-danger", "btn-sm");
-        delBtn.setOnAction(e -> {
-            Alert conf = new Alert(Alert.AlertType.CONFIRMATION, "Delete this listing?");
-            conf.showAndWait().ifPresent(r -> {
-                if (r == ButtonType.OK) {
-                    DummyDataService.getInstance().removeListing(l.getId());
-                    showMyListings();
-                }
-            });
-        });
+        delBtn.setDisable(true);
 
         row.getChildren().addAll(info, status, editBtn, delBtn);
         return row;
@@ -337,11 +348,13 @@ public class SellerDashboardController {
             //only report success after the repository has committed the save
             new Alert(Alert.AlertType.INFORMATION,
                     "Listing saved! Status: Pending Review.").showAndWait();
-            showCreateListing(); //reset the form after a successful submission
+            showMyListings(); //show the saved listing from MySQL after submission
         });
 
-        form.getChildren().addAll(title,
-                new Label("Listing Type *"), typeCombo,
+        //choose the listing type first before entering details, selecting photos, or submitting
+        VBox listingDetails = new VBox(12);
+        listingDetails.disableProperty().bind(typeCombo.valueProperty().isNull());
+        listingDetails.getChildren().addAll(
                 new Label("Item Name *"), nameField,
                 new Label("Category *"), catCombo,
                 new Label("Condition *"), condCombo,
@@ -349,6 +362,7 @@ public class SellerDashboardController {
                 priceInputs, lendingInputs,
                 new Label("Meet-up Location *"), meetupCombo,
                 new Label("Photos (optional, up to 6)"), photoButtons, photoNote, photoPreviews, submitBtn);
+        form.getChildren().addAll(title, new Label("Listing Type *"), typeCombo, listingDetails);
 
         ScrollPane scroll = new ScrollPane(form);
         scroll.setFitToWidth(true);

@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -23,6 +24,22 @@ public class ListingService {
     public ListingService(UserRepository userRepository, ListingRepository listingRepository) {
         this.userRepository = Objects.requireNonNull(userRepository);
         this.listingRepository = Objects.requireNonNull(listingRepository);
+    }
+
+    //use the signed-in account, rather than accepting a seller name from the screen
+    public List<Listing> getMyListings(User user) throws SQLException {
+        User current = requireActiveSeller(user);
+        return listingRepository.findBySeller(current.getUsername());
+    }
+
+    //check the database account each time in case its role or active status changed
+    private User requireActiveSeller(User user) throws SQLException {
+        User current = user == null || user.getUsername() == null
+                ? null : userRepository.findByUsername(user.getUsername());
+        if (current == null || !current.isActive() || current.getRole() != UserRole.SELLER) {
+            throw new IllegalArgumentException("An active seller account is required to access your listings.");
+        }
+        return current;
     }
 
     //check the form details and seller account before saving a new listing
@@ -79,12 +96,7 @@ public class ListingService {
             }
         }
 
-        //read the account again in case it was disabled or its role changed after login
-        User current = user == null || user.getUsername() == null
-                ? null : userRepository.findByUsername(user.getUsername());
-        if (current == null || !current.isActive() || current.getRole() != UserRole.SELLER) {
-            throw new IllegalArgumentException("An active seller account is required to create a listing.");
-        }
+        User current = requireActiveSeller(user);
         //use the checked seller account and give this listing its own ID
         listing.setId(UUID.randomUUID().toString());
         listing.setSellerUsername(current.getUsername());

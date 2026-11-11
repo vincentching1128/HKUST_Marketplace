@@ -137,6 +137,7 @@ public class ListingRepository {
                 FROM listings l
                 JOIN users u ON u.username = l.seller_username
                 WHERE l.seller_username = ?
+                ORDER BY l.posted_at DESC, l.id DESC
                 """;
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
