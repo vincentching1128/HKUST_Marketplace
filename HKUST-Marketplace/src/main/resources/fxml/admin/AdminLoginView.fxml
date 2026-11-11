@@ -35,7 +35,7 @@
             <Label fx:id="errorLabel" text="" style="-fx-text-fill: #c62828; -fx-font-size: 13px;"
                    wrapText="true" managed="false" visible="false"/>
 
-            <Button text="Login as Admin" styleClass="btn-success" onAction="#handleLogin"
+            <Button text="Login as Admin" styleClass="btn-success" onAction="#handleLogin" defaultButton="true"
                     prefWidth="Infinity" prefHeight="42"/>
 
             <Hyperlink text="← Back to Welcome" onAction="#goWelcome"/>

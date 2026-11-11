@@ -36,7 +36,7 @@
             <Label fx:id="errorLabel" text="" style="-fx-text-fill: #c62828; -fx-font-size: 13px;"
                    wrapText="true" managed="false" visible="false"/>
 
-            <Button text="Login" styleClass="btn-primary" onAction="#handleLogin"
+            <Button text="Login" styleClass="btn-primary" onAction="#handleLogin" defaultButton="true"
                     prefWidth="Infinity" prefHeight="42"/>
 
             <HBox alignment="CENTER" spacing="6">
