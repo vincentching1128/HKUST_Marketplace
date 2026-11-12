@@ -130,7 +130,8 @@ public class SellerDashboardController {
         editBtn.getStyleClass().addAll("btn-outline", "btn-sm");
         editBtn.setOnAction(event -> {
             try {
-                Listing saved = listingService.getListingForEdit(SessionManager.getCurrentUser(), l.getId());
+                Listing saved = listingService.getListing(SessionManager.getCurrentUser(), l.getId());
+                listingService.checkCanChange(saved);
                 showListingForm(saved);
             } catch (IllegalArgumentException unavailable) {
                 new Alert(Alert.AlertType.WARNING, unavailable.getMessage()).showAndWait();
@@ -164,8 +165,141 @@ public class SellerDashboardController {
             delBtn.setTooltip(new Tooltip("This listing's status does not allow deletion."));
         }
 
-        row.getChildren().addAll(info, status, editBtn, delBtn);
+        Button viewBtn = new Button("View Details");
+        viewBtn.getStyleClass().addAll("btn-outline", "btn-sm");
+        viewBtn.setOnAction(event -> showListingDetails(l.getId()));
+        row.getChildren().addAll(info, status, viewBtn, editBtn, delBtn);
         return row;
+    }
+
+    //open an owned listing without requiring it to be editable
+    private void showListingDetails(String listingId) {
+        try {
+            //load a fresh copy so the screen shows the latest saved status and details
+            Listing listing = listingService.getListing(SessionManager.getCurrentUser(), listingId);
+            VBox details = createReadOnlyListingDetails(listing);
+            Button back = new Button("Back to My Listings");
+            back.getStyleClass().add("btn-outline");
+            back.setOnAction(event -> showMyListings());
+            VBox root = new VBox(14, back, details);
+            root.setPadding(new Insets(4));
+            ScrollPane scroll = new ScrollPane(root);
+            scroll.setFitToWidth(true);
+            setActive(btnListings, "Listing Details");
+            contentPane.getChildren().setAll(scroll);
+        } catch (IllegalArgumentException unavailable) {
+            new Alert(Alert.AlertType.WARNING, unavailable.getMessage()).showAndWait();
+        } catch (SQLException failure) {
+            //leave the current screen in place if the listing could not be loaded
+            new Alert(Alert.AlertType.ERROR, "Unable to load this listing. Please try again.").showAndWait();
+        }
+    }
+
+    //show saved fields as labels so opening details cannot change the listing
+    private VBox createReadOnlyListingDetails(Listing listing) {
+        VBox details = new VBox(12);
+        details.getStyleClass().add("card");
+        details.setPadding(new Insets(20));
+        Label title = new Label(listing.getTitle());
+        title.getStyleClass().add("section-title");
+        title.setWrapText(true);
+        details.getChildren().addAll(title, createListingPhotoGallery(listing.getPhotos()));
+
+        String seller = listing.getSellerFullName();
+        if (seller == null || seller.isBlank()) seller = listing.getSellerUsername();
+        DateTimeFormatter dateFormat = DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm", java.util.Locale.ENGLISH);
+        String[][] fields = {
+                {"Category", listing.getCategory()},
+                {"Condition", listing.getCondition()},
+                {"Listing Type", listing.getTypeDisplay()},
+                {"Status", listing.getStatus().name().replace('_', ' ')},
+                {"Seller", seller},
+                {"Seller Username", listing.getSellerUsername()},
+                {"Meet-up Location", listing.getMeetupLocation()},
+                {"Posted", listing.getPostedAt() == null ? "Unavailable" : listing.getPostedAt().format(dateFormat)}
+        };
+        for (String[] field : fields) {
+            Label label = new Label(field[0] + ": " + field[1]);
+            label.setWrapText(true);
+            details.getChildren().add(label);
+        }
+        //only show the terms that apply to this listing type
+        switch (listing.getType()) {
+            case SELL -> details.getChildren().add(new Label(String.format("Price: HK$ %.2f", listing.getPrice())));
+            case LEND -> details.getChildren().add(new Label("Lending Duration: " + listing.getLendingDurationDisplay()));
+            case GIVEAWAY -> details.getChildren().add(new Label("Free"));
+        }
+        Label descriptionTitle = new Label("Description");
+        descriptionTitle.setStyle("-fx-font-weight: bold;");
+        Label description = new Label(listing.getDescription());
+        description.setWrapText(true);
+        details.getChildren().addAll(descriptionTitle, description);
+        if (listing.getStatus() == ListingStatus.REJECTED && listing.getRejectionReason() != null
+                && !listing.getRejectionReason().isBlank()) {
+            Label reason = new Label("Rejection reason: " + listing.getRejectionReason());
+            reason.setWrapText(true);
+            details.getChildren().add(reason);
+        }
+        return details;
+    }
+
+    //display all saved photos without upload, remove, or other editing controls
+    private VBox createListingPhotoGallery(List<byte[]> photos) {
+        VBox gallery = new VBox(10);
+        Label heading = new Label("Photos");
+        heading.setStyle("-fx-font-weight: bold;");
+        gallery.getChildren().add(heading);
+        if (photos == null || photos.isEmpty()) {
+            gallery.getChildren().add(new Label("No photos for this listing."));
+            return gallery;
+        }
+
+        ImageView selectedPhoto = new ImageView();
+        selectedPhoto.setPreserveRatio(true);
+        selectedPhoto.setSmooth(true);
+        selectedPhoto.setFitHeight(420);
+        //shrink the main image on narrow windows while keeping its original proportions
+        selectedPhoto.fitWidthProperty().bind(javafx.beans.binding.Bindings.max(1,
+                javafx.beans.binding.Bindings.min(640, gallery.widthProperty())));
+        Label position = new Label();
+        Label photoError = new Label("This photo could not be displayed.");
+        photoError.setWrapText(true);
+        photoError.setVisible(false);
+        photoError.managedProperty().bind(photoError.visibleProperty());
+        FlowPane thumbnails = new FlowPane(8, 8);
+        ToggleGroup selection = new ToggleGroup();
+        gallery.getChildren().addAll(selectedPhoto, photoError, position, thumbnails);
+
+        for (int i = 0; i < photos.size(); i++) {
+            int index = i;
+            byte[] bytes = photos.get(i);
+            ToggleButton thumbnail = new ToggleButton();
+            thumbnail.setToggleGroup(selection);
+            thumbnail.setAccessibleText("Show photo " + (i + 1));
+            thumbnail.setTooltip(new Tooltip("Photo " + (i + 1)));
+            //decode thumbnails at their display size rather than loading six full-size images
+            Image small = bytes == null || bytes.length == 0 ? null
+                    : new Image(new ByteArrayInputStream(bytes), 96, 72, true, true);
+            if (small == null || small.isError()) {
+                thumbnail.setText("Photo " + (i + 1) + " unavailable");
+            } else {
+                ImageView preview = new ImageView(small);
+                thumbnail.setGraphic(preview);
+            }
+            thumbnail.setOnAction(event -> {
+                thumbnail.setSelected(true);
+                //only decode the selected large image; corrupt data should not hide the details
+                Image large = bytes == null || bytes.length == 0 ? null
+                        : new Image(new ByteArrayInputStream(bytes), 640, 420, true, true);
+                boolean unreadable = large == null || large.isError();
+                selectedPhoto.setImage(unreadable ? null : large);
+                photoError.setVisible(unreadable);
+                position.setText("Photo " + (index + 1) + " of " + photos.size());
+            });
+            thumbnails.getChildren().add(thumbnail);
+            if (i == 0) thumbnail.fire();
+        }
+        return gallery;
     }
 
     @FXML

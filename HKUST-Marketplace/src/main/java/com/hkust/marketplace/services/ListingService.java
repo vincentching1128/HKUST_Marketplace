@@ -62,32 +62,33 @@ public class ListingService {
         listingRepository.create(listing);
     }
 
-    //read the listing through an ownership-filtered query before opening the edit form
-    public Listing getListingForEdit(User user, String id) throws SQLException {
+    //load an owned listing in any status; edit/delete apply their extra checks separately
+    public Listing getListing(User user, String id) throws SQLException {
         User current = requireActiveSeller(user);
         Listing listing = listingRepository.findByIdAndSeller(id, current.getUsername());
         if (listing == null) throw new IllegalArgumentException("Listing not found or no longer available to your account.");
-        checkCanChange(listing);
         return listing;
     }
 
     public void updateListing(User user, String id, Listing changes) throws SQLException {
         User current = requireActiveSeller(user);
         validateListing(changes);
-        Listing existing = getListingForEdit(user, id);
+        Listing existing = getListing(user, id);
         checkCanChange(existing);
         listingRepository.updateOwned(id, current.getUsername(), changes);
     }
 
     public void deleteListing(User user, String id) throws SQLException {
         User current = requireActiveSeller(user);
-        Listing existing = getListingForEdit(user, id);
+        Listing existing = getListing(user, id);
         checkCanChange(existing);
         listingRepository.deleteOwned(id, current.getUsername());
     }
 
+    //check before opening the edit form and again before saving or deleting
+    //this checks change restrictions only; getListing performs account and ownership checks
     //offers still use the existing in-memory store until the offer flow moves to MySQL
-    private void checkCanChange(Listing listing) {
+    public void checkCanChange(Listing listing) {
         if (!Set.of(ListingStatus.PENDING_REVIEW, ListingStatus.LIVE, ListingStatus.REJECTED)
                 .contains(listing.getStatus())) {
             throw new IllegalArgumentException("Reserved, completed, or removed listings cannot be edited or deleted.");
