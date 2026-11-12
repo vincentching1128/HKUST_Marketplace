@@ -157,6 +157,40 @@ public class ListingRepository {
         return listings;
     }
 
+    /**
+     * Returns every listing with the given status, oldest first.
+     * Used by the admin review screen with {@link ListingStatus#PENDING_REVIEW},
+     * and reusable for other status filters (e.g. an "all live listings" view).
+     */
+    public List<Listing> findByStatus(ListingStatus status) throws SQLException {
+        if (status == null) {
+            throw new IllegalArgumentException("A listing status is required.");
+        }
+        List<Listing> listings = new ArrayList<>();
+        //read the seller's current name from users instead of storing a second copy
+        String sql = """
+                SELECT l.*, u.full_name AS seller_full_name
+                FROM listings l
+                JOIN users u ON u.username = l.seller_username
+                WHERE l.listingStatus = ?
+                ORDER BY l.posted_at ASC, l.id ASC
+                """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+             stmt.setString(1, status.name());
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    listings.add(mapRow(rs));
+                }
+            }
+            //load each listing's photos using the same connection
+            for (Listing listing : listings) {
+                listing.setPhotos(findPhotos(conn, listing.getId()));
+            }
+        }
+        return listings;
+    }
+
     public Listing findByIdAndSeller(String id, String sellerUsername) throws SQLException {
         String sql = "SELECT l.*, u.full_name AS seller_full_name FROM listings l "
                 + "JOIN users u ON u.username = l.seller_username WHERE l.id = ? AND l.seller_username = ?";

@@ -134,7 +134,13 @@ public class AdminDashboardController {
         card.getChildren().addAll(title, meta, submitted, actions);
         return card;
     }
+    //handle the approval of listing in database
+    private void approve_listing(Listing target){
 
+    }
+    private void reject_listing(Listing target){
+
+    }
     @FXML
     private void showAllListings() {
         setActive(btnAllListings, "Manage All Listings");
@@ -185,6 +191,10 @@ public class AdminDashboardController {
         ScrollPane scroll = new ScrollPane(root);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
+    }
+    //for admin to create new listing for user(implement later)
+    private void createListing(){
+
     }
 
     @FXML
