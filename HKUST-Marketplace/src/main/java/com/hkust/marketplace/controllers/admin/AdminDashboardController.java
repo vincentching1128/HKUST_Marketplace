@@ -69,6 +69,8 @@ public class AdminDashboardController {
             dbError.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
             dbError.setWrapText(true);
             root.getChildren().add(dbError);
+            contentPane.getChildren().add(new ScrollPane(root));
+            return;
         }
         if (pending.isEmpty()) {
             Label empty = new Label("No listings awaiting review.");
@@ -135,6 +137,7 @@ public class AdminDashboardController {
                     new Alert(Alert.AlertType.WARNING, "Reason is required.").showAndWait();
                     return;
                 }
+                reject_listing(l,reason.trim());
                 /*
                 l.setStatus(ListingStatus.REJECTED);
                 l.setRejectionReason(reason);
@@ -155,9 +158,28 @@ public class AdminDashboardController {
     }
     //handle the approval of listing in database
     private void approve_listing(Listing target){
+        try{
+            if(!listingRepository.updateReview(target.getId(),ListingStatus.LIVE,null)){
+                new Alert(Alert.AlertType.ERROR, "This listing no longer exists.").showAndWait();
+            }
+
+        }catch(SQLException ex){
+            LOGGER.log(Level.SEVERE, "Failed to approve listing " + target.getId(), ex);
+            new Alert(Alert.AlertType.ERROR, "Unable to approve this listing. Please try again.").showAndWait();
+        }
 
     }
-    private void reject_listing(Listing target){
+    private void reject_listing(Listing target, String reason){
+        try{
+            if(!listingRepository.updateReview(target.getId(),ListingStatus.REJECTED,reason)){
+                new Alert(Alert.AlertType.ERROR, "This listing no longer exists.").showAndWait();
+            }
+        }catch(IllegalArgumentException invalidReason){
+            new Alert(Alert.AlertType.WARNING, invalidReason.getMessage()).showAndWait();
+        } catch (SQLException ex) {
+            LOGGER.log(Level.SEVERE, "Failed to reject listing " + target.getId(), ex);
+            new Alert(Alert.AlertType.ERROR, "Unable to reject this listing. Please try again.").showAndWait();
+        }
 
     }
     @FXML
