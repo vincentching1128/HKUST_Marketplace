@@ -128,7 +128,29 @@ public class ListingRepository {
             }
         }
     }
-
+    public List<Listing> findAllListing() throws SQLException {
+        List<Listing> listings = new ArrayList<>();
+        //read the seller's current name from users and listing
+        String sql = """
+                SELECT l.*, u.full_name AS seller_full_name
+                FROM listings l
+                JOIN users u ON u.username = l.seller_username
+                ORDER BY l.posted_at ASC, l.id ASC
+                """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    listings.add(mapRow(rs));
+                }
+            }
+            //load each listing's photos using the same connection
+            for (Listing listing : listings) {
+                listing.setPhotos(findPhotos(conn, listing.getId()));
+            }
+        }
+        return listings;
+    }
     public List<Listing> findBySeller(String sellerUsername) throws SQLException {
         List<Listing> listings = new ArrayList<>();
         //read the seller's current name from users instead of storing a second copy

@@ -195,8 +195,19 @@ public class AdminDashboardController {
         addBtn.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION,
                 "Admin can create a listing on behalf of a seller here.\nSame form fields as Seller Create Listing.\n(UI placeholder)").showAndWait());
         root.getChildren().add(addBtn);
-
-        for (Listing l : DummyDataService.getInstance().getAllListings()) {
+        List<Listing> lists = List.of();
+        try{
+            lists = listingRepository.findAllListing();
+        } catch (SQLException ex) {
+            LOGGER.log(Level.SEVERE, "Failed to load listings from the database.", ex);
+            Label dbError = new Label("Unable to load listings. Please try again.");
+            dbError.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
+            dbError.setWrapText(true);
+            root.getChildren().add(dbError);
+            contentPane.getChildren().add(new ScrollPane(root));
+            return;
+        }
+        for (Listing l : lists) {
             HBox row = new HBox(12);
             row.getStyleClass().add("card");
             row.setAlignment(Pos.CENTER_LEFT);
@@ -256,6 +267,7 @@ public class AdminDashboardController {
             dbError.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
             dbError.setWrapText(true);
             root.getChildren().add(dbError);
+            return;
         }
 
         for (User u : allUsers) {
