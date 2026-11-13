@@ -157,6 +157,40 @@ public class ListingRepository {
         return listings;
     }
 
+    /**
+     * Returns every listing with the given status, oldest first.
+     * Used by the admin review screen with {@link ListingStatus#PENDING_REVIEW},
+     * and reusable for other status filters (e.g. an "all live listings" view).
+     */
+    public List<Listing> findByStatus(ListingStatus status) throws SQLException {
+        if (status == null) {
+            throw new IllegalArgumentException("A listing status is required.");
+        }
+        List<Listing> listings = new ArrayList<>();
+        //read the seller's current name from users instead of storing a second copy
+        String sql = """
+                SELECT l.*, u.full_name AS seller_full_name
+                FROM listings l
+                JOIN users u ON u.username = l.seller_username
+                WHERE l.listingStatus = ?
+                ORDER BY l.posted_at ASC, l.id ASC
+                """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+             stmt.setString(1, status.name());
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    listings.add(mapRow(rs));
+                }
+            }
+            //load each listing's photos using the same connection
+            for (Listing listing : listings) {
+                listing.setPhotos(findPhotos(conn, listing.getId()));
+            }
+        }
+        return listings;
+    }
+
     public Listing findByIdAndSeller(String id, String sellerUsername) throws SQLException {
         String sql = "SELECT l.*, u.full_name AS seller_full_name FROM listings l "
                 + "JOIN users u ON u.username = l.seller_username WHERE l.id = ? AND l.seller_username = ?";
@@ -171,6 +205,49 @@ public class ListingRepository {
             }
             listing.setPhotos(findPhotos(conn, id));
             return listing;
+        }
+    }
+
+    /**
+     * Records an admin review decision. Only listingStatus, reviewed_at and
+     * rejection_reason are written; every other column (content, seller, photos) is untouched.
+     * Approving with {@link ListingStatus#LIVE} clears any old rejection reason; rejecting
+     * requires a non-blank reason (the table CHECK enforces the same rule).
+     *
+     * @return true when the listing exists and was updated
+     */
+    public boolean updateReview(String listingId, ListingStatus status, String rejectionReason)
+            throws SQLException {
+        if (listingId == null || listingId.isBlank()) {
+            throw new IllegalArgumentException("A listing ID is required.");
+        }
+        if (status == null) {
+            throw new IllegalArgumentException("A review status is required.");
+        }
+        String reason = rejectionReason == null ? null : rejectionReason.trim();
+        if (status == ListingStatus.REJECTED) {
+            //fail early with a readable message instead of hitting the CHECK constraint
+            if (reason == null || reason.isEmpty()) {
+                throw new IllegalArgumentException("A rejection reason is required.");
+            }
+        } else {
+            //approval (and any other decision) must not keep a stale rejection reason
+            reason = null;
+        }
+
+        String sql = """
+                UPDATE listings
+                SET listingStatus = ?, reviewed_at = ?, rejection_reason = ?
+                WHERE id = ?
+                """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, status.name());
+            stmt.setTimestamp(2, Timestamp.valueOf(LocalDateTime.now()));
+            if (reason == null) stmt.setNull(3, Types.VARCHAR);
+            else stmt.setString(3, reason);
+            stmt.setString(4, listingId);
+            return stmt.executeUpdate() > 0;
         }
     }
 

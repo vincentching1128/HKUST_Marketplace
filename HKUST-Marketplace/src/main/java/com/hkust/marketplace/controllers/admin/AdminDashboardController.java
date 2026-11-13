@@ -2,6 +2,7 @@ package com.hkust.marketplace.controllers.admin;
 
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.repositories.ListingRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
@@ -33,6 +34,7 @@ public class AdminDashboardController {
 
     private Button currentActiveBtn;
     private final UserRepository userRepository = new UserRepository();
+    private final ListingRepository listingRepository = new ListingRepository();
 
     @FXML
     public void initialize() {
@@ -57,7 +59,19 @@ public class AdminDashboardController {
         VBox root = new VBox(14);
         root.setPadding(new Insets(4));
 
-        List<Listing> pending = DummyDataService.getInstance().getPendingListings();
+        //List<Listing> pending = DummyDataService.getInstance().getPendingListings();
+        List<Listing> pending = List.of();
+        try{
+            pending = listingRepository.findByStatus(ListingStatus.PENDING_REVIEW);
+        }catch(SQLException ex){
+            LOGGER.log(Level.SEVERE, "Failed to load listings from the database.", ex);
+            Label dbError = new Label("Unable to load listings. Please try again.");
+            dbError.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
+            dbError.setWrapText(true);
+            root.getChildren().add(dbError);
+            contentPane.getChildren().add(new ScrollPane(root));
+            return;
+        }
         if (pending.isEmpty()) {
             Label empty = new Label("No listings awaiting review.");
             empty.setStyle("-fx-text-fill: #2e7d32; -fx-font-size: 15px;");
@@ -96,12 +110,16 @@ public class AdminDashboardController {
             Alert conf = new Alert(Alert.AlertType.CONFIRMATION, "Approve this listing?");
             conf.showAndWait().ifPresent(r -> {
                 if (r == ButtonType.OK) {
+                    approve_listing(l);
+                    /*
                     l.setStatus(ListingStatus.LIVE);
                     l.setReviewedAt(LocalDateTime.now());
                     DummyDataService.getInstance().updateListing(l);
                     DummyDataService.getInstance().addNotification(new Notification(
                             l.getSellerUsername(), "Listing Approved",
                             "Your listing '" + l.getTitle() + "' is now live!", "System"));
+
+                     */
                     showReview();
                 }
             });
@@ -119,6 +137,8 @@ public class AdminDashboardController {
                     new Alert(Alert.AlertType.WARNING, "Reason is required.").showAndWait();
                     return;
                 }
+                reject_listing(l,reason.trim());
+                /*
                 l.setStatus(ListingStatus.REJECTED);
                 l.setRejectionReason(reason);
                 l.setReviewedAt(LocalDateTime.now());
@@ -126,6 +146,8 @@ public class AdminDashboardController {
                 DummyDataService.getInstance().addNotification(new Notification(
                         l.getSellerUsername(), "Listing Rejected",
                         "Your listing '" + l.getTitle() + "' was rejected. Reason: " + reason, "System"));
+
+                 */
                 showReview();
             });
         });
@@ -134,7 +156,32 @@ public class AdminDashboardController {
         card.getChildren().addAll(title, meta, submitted, actions);
         return card;
     }
+    //handle the approval of listing in database
+    private void approve_listing(Listing target){
+        try{
+            if(!listingRepository.updateReview(target.getId(),ListingStatus.LIVE,null)){
+                new Alert(Alert.AlertType.ERROR, "This listing no longer exists.").showAndWait();
+            }
 
+        }catch(SQLException ex){
+            LOGGER.log(Level.SEVERE, "Failed to approve listing " + target.getId(), ex);
+            new Alert(Alert.AlertType.ERROR, "Unable to approve this listing. Please try again.").showAndWait();
+        }
+
+    }
+    private void reject_listing(Listing target, String reason){
+        try{
+            if(!listingRepository.updateReview(target.getId(),ListingStatus.REJECTED,reason)){
+                new Alert(Alert.AlertType.ERROR, "This listing no longer exists.").showAndWait();
+            }
+        }catch(IllegalArgumentException invalidReason){
+            new Alert(Alert.AlertType.WARNING, invalidReason.getMessage()).showAndWait();
+        } catch (SQLException ex) {
+            LOGGER.log(Level.SEVERE, "Failed to reject listing " + target.getId(), ex);
+            new Alert(Alert.AlertType.ERROR, "Unable to reject this listing. Please try again.").showAndWait();
+        }
+
+    }
     @FXML
     private void showAllListings() {
         setActive(btnAllListings, "Manage All Listings");
@@ -185,6 +232,10 @@ public class AdminDashboardController {
         ScrollPane scroll = new ScrollPane(root);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
+    }
+    //for admin to create new listing for user(implement later)
+    private void createListing(){
+
     }
 
     @FXML
