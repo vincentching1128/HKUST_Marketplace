@@ -192,12 +192,13 @@ public class AdminDashboardController {
 
         Button addBtn = new Button("+ Add Listing (on behalf of seller)");
         addBtn.getStyleClass().add("btn-primary");
-        addBtn.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION,
-                "Admin can create a listing on behalf of a seller here.\nSame form fields as Seller Create Listing.\n(UI placeholder)").showAndWait());
+        addBtn.setOnAction(e -> createListing());
+        /*addBtn.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION,
+                "Admin can create a listing on behalf of a seller here.\nSame form fields as Seller Create Listing.\n(UI placeholder)").showAndWait());*/
         root.getChildren().add(addBtn);
-        List<Listing> lists = List.of();
+        List<Listing> alllists = List.of();
         try{
-            lists = listingRepository.findAllListing();
+            alllists = listingRepository.findAllListing();
         } catch (SQLException ex) {
             LOGGER.log(Level.SEVERE, "Failed to load listings from the database.", ex);
             Label dbError = new Label("Unable to load listings. Please try again.");
@@ -207,7 +208,7 @@ public class AdminDashboardController {
             contentPane.getChildren().add(new ScrollPane(root));
             return;
         }
-        for (Listing l : lists) {
+        for (Listing l : alllists) {
             HBox row = new HBox(12);
             row.getStyleClass().add("card");
             row.setAlignment(Pos.CENTER_LEFT);
@@ -223,7 +224,8 @@ public class AdminDashboardController {
 
             Button edit = new Button("Edit");
             edit.getStyleClass().addAll("btn-outline", "btn-sm");
-            edit.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION, "Edit listing dialog (demo).").showAndWait());
+            //edit.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION, "Edit listing dialog (demo).").showAndWait());
+            edit.setOnAction(e ->editListing(l));
 
             Button remove = new Button("Remove");
             remove.getStyleClass().addAll("btn-danger", "btn-sm");
@@ -231,7 +233,8 @@ public class AdminDashboardController {
                 Alert conf = new Alert(Alert.AlertType.CONFIRMATION, "Permanently remove this listing?");
                 conf.showAndWait().ifPresent(r -> {
                     if (r == ButtonType.OK) {
-                        DummyDataService.getInstance().removeListing(l.getId());
+                        removeListing(l);
+                        //DummyDataService.getInstance().removeListing(l.getId());
                         showAllListings();
                     }
                 });
@@ -247,6 +250,17 @@ public class AdminDashboardController {
     //for admin to create new listing for user(implement later)
     private void createListing(){
 
+    }
+    private void editListing(Listing target){
+
+    }
+    private void removeListing(Listing target){
+        try{
+            listingRepository.deleteOwned(target.getId(),target.getSellerUsername());
+        }catch(SQLException ex){
+            LOGGER.log(Level.SEVERE, "Failed to remove listing " + target.getId(), ex);
+            new Alert(Alert.AlertType.ERROR, "Unable to remove this listing. Please try again.").showAndWait();
+        }
     }
 
     @FXML
