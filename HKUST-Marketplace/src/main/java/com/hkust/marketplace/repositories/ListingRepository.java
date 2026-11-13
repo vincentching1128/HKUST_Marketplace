@@ -208,6 +208,49 @@ public class ListingRepository {
         }
     }
 
+    /**
+     * Records an admin review decision. Only listingStatus, reviewed_at and
+     * rejection_reason are written; every other column (content, seller, photos) is untouched.
+     * Approving with {@link ListingStatus#LIVE} clears any old rejection reason; rejecting
+     * requires a non-blank reason (the table CHECK enforces the same rule).
+     *
+     * @return true when the listing exists and was updated
+     */
+    public boolean updateReview(String listingId, ListingStatus status, String rejectionReason)
+            throws SQLException {
+        if (listingId == null || listingId.isBlank()) {
+            throw new IllegalArgumentException("A listing ID is required.");
+        }
+        if (status == null) {
+            throw new IllegalArgumentException("A review status is required.");
+        }
+        String reason = rejectionReason == null ? null : rejectionReason.trim();
+        if (status == ListingStatus.REJECTED) {
+            //fail early with a readable message instead of hitting the CHECK constraint
+            if (reason == null || reason.isEmpty()) {
+                throw new IllegalArgumentException("A rejection reason is required.");
+            }
+        } else {
+            //approval (and any other decision) must not keep a stale rejection reason
+            reason = null;
+        }
+
+        String sql = """
+                UPDATE listings
+                SET listingStatus = ?, reviewed_at = ?, rejection_reason = ?
+                WHERE id = ?
+                """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, status.name());
+            stmt.setTimestamp(2, Timestamp.valueOf(LocalDateTime.now()));
+            if (reason == null) stmt.setNull(3, Types.VARCHAR);
+            else stmt.setString(3, reason);
+            stmt.setString(4, listingId);
+            return stmt.executeUpdate() > 0;
+        }
+    }
+
     //lock the owned row so a concurrent status change cannot slip past the check
     private void lockChangeableListing(Connection conn, String id, String seller) throws SQLException {
         try (PreparedStatement stmt = conn.prepareStatement(
