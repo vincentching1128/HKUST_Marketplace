@@ -272,6 +272,28 @@ public class ListingRepository {
             return stmt.executeUpdate() > 0;
         }
     }
+    public void removeListing(String listingId, String username)
+            throws SQLException {
+        if (listingId == null || listingId.isBlank()) {
+            throw new IllegalArgumentException("A listing ID is required.");
+        }
+        String name = username == null ? null : username.trim();
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("A username is required.");
+        }
+
+        String sql = """
+                UPDATE listings
+                SET listingStatus = REMOVED
+                WHERE id = ? AND seller_username = ?
+                """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, listingId);
+            stmt.setString(2, name);
+            stmt.executeUpdate();
+        }
+    }
 
     //lock the owned row so a concurrent status change cannot slip past the check
     private void lockChangeableListing(Connection conn, String id, String seller) throws SQLException {
@@ -324,6 +346,57 @@ public class ListingRepository {
                 }
                 insertPhotos(conn, id, listing.getPhotos() == null ? List.of() : listing.getPhotos());
                 conn.commit();
+            } catch (SQLException | RuntimeException failure) {
+                try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+                throw failure;
+            }
+        }
+    }
+
+    /**
+     * Admin content edit: updates every listing field and replaces the photo set.
+     * Unlike the seller path it accepts any current status, and the listing is sent
+     * back to Pending Review with its previous review result cleared.
+     *
+     * @return false when no listing has that id
+     */
+    public boolean updateAsAdmin(String id, Listing listing) throws SQLException {
+        String sql = """
+                UPDATE listings SET itemName = ?, category = ?, listingType = ?, price = ?,
+                    description = ?, item_condition = ?, lending_duration = ?, lending_unit = ?,
+                    meetup_location = ?, listingStatus = 'PENDING_REVIEW',
+                    reviewed_at = NULL, rejection_reason = NULL
+                WHERE id = ?
+                """;
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                    stmt.setString(1, listing.getTitle());
+                    stmt.setString(2, listing.getCategory());
+                    stmt.setString(3, listing.getType().name());
+                    if (listing.getPrice() == null) stmt.setNull(4, Types.DECIMAL);
+                    else stmt.setBigDecimal(4, BigDecimal.valueOf(listing.getPrice()));
+                    stmt.setString(5, listing.getDescription());
+                    stmt.setString(6, listing.getCondition().toUpperCase(java.util.Locale.ROOT).replace(' ', '_'));
+                    if (listing.getLendingDuration() == null) stmt.setNull(7, Types.INTEGER);
+                    else stmt.setInt(7, listing.getLendingDuration());
+                    stmt.setString(8, listing.getLendingUnit() == null ? null : listing.getLendingUnit().name());
+                    stmt.setString(9, listing.getMeetupLocation());
+                    stmt.setString(10, id);
+                    if (stmt.executeUpdate() != 1) {
+                        conn.rollback();
+                        return false;
+                    }
+                }
+                //replace the photo set in the same transaction, including when all were removed
+                try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM listing_photos WHERE listing_id = ?")) {
+                    stmt.setString(1, id);
+                    stmt.executeUpdate();
+                }
+                insertPhotos(conn, id, listing.getPhotos() == null ? List.of() : listing.getPhotos());
+                conn.commit();
+                return true;
             } catch (SQLException | RuntimeException failure) {
                 try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
                 throw failure;
