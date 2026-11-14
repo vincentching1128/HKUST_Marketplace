@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS listings (
     reviewed_at DATETIME(6),
     rejection_reason TEXT,
     view_count INT NOT NULL DEFAULT 0,
+    row_version BIGINT NOT NULL DEFAULT 1,
 
     CONSTRAINT chk_listing_id_not_blank
     CHECK (CHAR_LENGTH(TRIM(id)) > 0),
