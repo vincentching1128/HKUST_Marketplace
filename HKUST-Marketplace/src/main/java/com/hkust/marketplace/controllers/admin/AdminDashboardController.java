@@ -29,6 +29,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -131,7 +132,7 @@ public class AdminDashboardController {
         addDetailRow(details, 3, "Listing type", l.getTypeDisplay());
         addDetailRow(details, 4, "Meet-up location", l.getMeetupLocation());
         addDetailRow(details, 5, "Submitted", l.getPostedAt() == null ? null
-                : l.getPostedAt().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm")));
+                : l.getPostedAt().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.ENGLISH)));
 
         //photos uploaded by the seller (0-6), shown as thumbnails
         VBox photosBox = new VBox(6);
@@ -259,7 +260,7 @@ public class AdminDashboardController {
         VBox root = new VBox(12);
         root.setPadding(new Insets(4));
 
-        Button addBtn = new Button("+ Add Listing (on behalf of seller)");
+        Button addBtn = new Button("Create Listing");
         addBtn.getStyleClass().add("btn-primary");
         addBtn.setOnAction(e -> createListing());
         /*addBtn.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION,
@@ -350,7 +351,7 @@ public class AdminDashboardController {
         form.getStyleClass().add("card");
         form.setPadding(new Insets(20));
 
-        Label title = new Label(editing ? "Edit listing" : "Create a listing for a seller");
+        Label title = new Label(editing ? "Edit listing" : "Create Listing");
         title.getStyleClass().add("section-title");
 
         //create: pick an active seller from MySQL; edit: the owner is read-only
@@ -359,7 +360,7 @@ public class AdminDashboardController {
             sellerCombo = null;
         } else {
             sellerCombo = new ComboBox<>();
-            sellerCombo.setPromptText("Seller *");
+            sellerCombo.setPromptText("Select Seller");
             sellerCombo.setMaxWidth(Double.MAX_VALUE);
             try {
                 List<User> sellers = new ArrayList<>();
@@ -617,7 +618,7 @@ public class AdminDashboardController {
             sellerLabel.setStyle("-fx-text-fill: #5a5a7a;");
             form.getChildren().addAll(title, sellerLabel, new Label("Listing Type *"), typeCombo, listingDetails);
         } else {
-            form.getChildren().addAll(title, new Label("Seller *"), sellerCombo,
+            form.getChildren().addAll(title, new Label("Select Seller *"), sellerCombo,
                     new Label("Listing Type *"), typeCombo, listingDetails);
         }
 
@@ -1001,7 +1002,7 @@ public class AdminDashboardController {
                 m.setWrapText(true);
                 m.setStyle("-fx-text-fill: #5a5a7a;");
                 Label meta = new Label(n.getCategory() + " · " +
-                        n.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM HH:mm")));
+                        n.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM HH:mm", Locale.ENGLISH)));
                 meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
                 item.getChildren().addAll(t, m, meta);
                 root.getChildren().add(item);
