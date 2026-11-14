@@ -43,6 +43,16 @@ public class ListingService {
         return current;
     }
 
+    //admin actions re-read the account so a demoted/deactivated admin is rejected
+    private User requireActiveAdmin(User user) throws SQLException {
+        User current = user == null || user.getUsername() == null
+                ? null : userRepository.findByUsername(user.getUsername());
+        if (current == null || !current.isActive() || current.getRole() != UserRole.ADMIN) {
+            throw new IllegalArgumentException("An active admin account is required.");
+        }
+        return current;
+    }
+
     //check the form details and seller account before saving a new listing
     public void createListing(User user, Listing listing) throws SQLException {
         validateListing(listing);
@@ -60,6 +70,37 @@ public class ListingService {
         listing.setViewCount(0);
         //the repository commits the transaction, or rolls it back if saving fails
         listingRepository.create(listing);
+    }
+
+    /** Admin action: create a listing on behalf of an active seller; it starts Pending Review. */
+    public void createListingAsAdmin(User admin, String sellerUsername, Listing listing) throws SQLException {
+        requireActiveAdmin(admin);
+        validateListing(listing);
+        User seller = sellerUsername == null || sellerUsername.isBlank()
+                ? null : userRepository.findByUsername(sellerUsername);
+        if (seller == null || !seller.isActive() || seller.getRole() != UserRole.SELLER) {
+            throw new IllegalArgumentException("Choose an active seller account.");
+        }
+        //the seller's account owns the listing, not the admin who typed it
+        listing.setId(UUID.randomUUID().toString());
+        listing.setSellerUsername(seller.getUsername());
+        listing.setSellerFullName(seller.getFullName());
+        listing.setStatus(ListingStatus.PENDING_REVIEW);
+        listing.setPostedAt(LocalDateTime.now());
+        listing.setReviewedAt(null);
+        listing.setRejectionReason(null);
+        listing.setViewCount(0);
+        listingRepository.create(listing);
+    }
+
+    /** Admin action: edit any listing's content; it returns to Pending Review for re-approval. */
+    public void updateListingAsAdmin(User admin, String id, Listing changes) throws SQLException {
+        requireActiveAdmin(admin);
+        if (id == null || id.isBlank()) throw new IllegalArgumentException("A listing ID is required.");
+        validateListing(changes);
+        if (!listingRepository.updateAsAdmin(id, changes)) {
+            throw new IllegalArgumentException("Listing not found.");
+        }
     }
 
     //load an owned listing in any status; edit/delete apply their extra checks separately

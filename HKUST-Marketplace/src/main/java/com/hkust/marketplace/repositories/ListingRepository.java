@@ -128,7 +128,30 @@ public class ListingRepository {
             }
         }
     }
-
+    public List<Listing> findAllListing() throws SQLException {
+        List<Listing> listings = new ArrayList<>();
+        //read the seller's current name from users and listing
+        String sql = """
+                SELECT l.*, u.full_name AS seller_full_name
+                FROM listings l
+                JOIN users u ON u.username = l.seller_username
+                WHERE l.listingStatus <> 'REMOVED'
+                ORDER BY l.posted_at ASC, l.id ASC
+                """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    listings.add(mapRow(rs));
+                }
+            }
+            //load each listing's photos using the same connection
+            for (Listing listing : listings) {
+                listing.setPhotos(findPhotos(conn, listing.getId()));
+            }
+        }
+        return listings;
+    }
     public List<Listing> findBySeller(String sellerUsername) throws SQLException {
         List<Listing> listings = new ArrayList<>();
         //read the seller's current name from users instead of storing a second copy
@@ -137,6 +160,7 @@ public class ListingRepository {
                 FROM listings l
                 JOIN users u ON u.username = l.seller_username
                 WHERE l.seller_username = ?
+                  AND l.listingStatus <> 'REMOVED'
                 ORDER BY l.posted_at DESC, l.id DESC
                 """;
         try (Connection conn = DatabaseManager.getConnection();
@@ -161,6 +185,8 @@ public class ListingRepository {
      * Returns every listing with the given status, oldest first.
      * Used by the admin review screen with {@link ListingStatus#PENDING_REVIEW},
      * and reusable for other status filters (e.g. an "all live listings" view).
+     * Removed listings are never returned, even when asking for
+     * {@link ListingStatus#REMOVED}.
      */
     public List<Listing> findByStatus(ListingStatus status) throws SQLException {
         if (status == null) {
@@ -173,6 +199,7 @@ public class ListingRepository {
                 FROM listings l
                 JOIN users u ON u.username = l.seller_username
                 WHERE l.listingStatus = ?
+                  AND l.listingStatus <> 'REMOVED'
                 ORDER BY l.posted_at ASC, l.id ASC
                 """;
         try (Connection conn = DatabaseManager.getConnection();
@@ -193,7 +220,8 @@ public class ListingRepository {
 
     public Listing findByIdAndSeller(String id, String sellerUsername) throws SQLException {
         String sql = "SELECT l.*, u.full_name AS seller_full_name FROM listings l "
-                + "JOIN users u ON u.username = l.seller_username WHERE l.id = ? AND l.seller_username = ?";
+                + "JOIN users u ON u.username = l.seller_username WHERE l.id = ? AND l.seller_username = ?"
+                + " AND l.listingStatus <> 'REMOVED'";
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, id);
@@ -251,6 +279,37 @@ public class ListingRepository {
         }
     }
 
+    /**
+     * Soft delete: marks one owned listing as REMOVED, keeping its row, photos and history.
+     * Removed listings are excluded from every find method in this repository.
+     *
+     * @return true when the listing existed, was not already removed and was updated
+     */
+    public boolean removeListing(String listingId, String username, String reason) throws SQLException {
+        if (listingId == null || listingId.isBlank()) {
+            throw new IllegalArgumentException("A listing ID is required.");
+        }
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("A seller username is required.");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("A reason is required.");
+        }
+        String sql = """
+                UPDATE listings
+                SET listingStatus = 'REMOVED', rejection_reason = ?
+                WHERE id = ? AND seller_username = ? AND listingStatus <> 'REMOVED'
+                """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1,reason);
+            stmt.setString(2, listingId);
+            stmt.setString(3, username.trim());
+            return stmt.executeUpdate() > 0;
+        }
+    }
+
+
     //lock the owned row so a concurrent status change cannot slip past the check
     private void lockChangeableListing(Connection conn, String id, String seller) throws SQLException {
         try (PreparedStatement stmt = conn.prepareStatement(
@@ -302,6 +361,57 @@ public class ListingRepository {
                 }
                 insertPhotos(conn, id, listing.getPhotos() == null ? List.of() : listing.getPhotos());
                 conn.commit();
+            } catch (SQLException | RuntimeException failure) {
+                try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+                throw failure;
+            }
+        }
+    }
+
+    /**
+     * Admin content edit: updates every listing field and replaces the photo set.
+     * Unlike the seller path it accepts any current status, and the listing is sent
+     * back to Pending Review with its previous review result cleared.
+     *
+     * @return false when no listing has that id
+     */
+    public boolean updateAsAdmin(String id, Listing listing) throws SQLException {
+        String sql = """
+                UPDATE listings SET itemName = ?, category = ?, listingType = ?, price = ?,
+                    description = ?, item_condition = ?, lending_duration = ?, lending_unit = ?,
+                    meetup_location = ?, listingStatus = 'PENDING_REVIEW',
+                    reviewed_at = NULL, rejection_reason = NULL
+                WHERE id = ?
+                """;
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                    stmt.setString(1, listing.getTitle());
+                    stmt.setString(2, listing.getCategory());
+                    stmt.setString(3, listing.getType().name());
+                    if (listing.getPrice() == null) stmt.setNull(4, Types.DECIMAL);
+                    else stmt.setBigDecimal(4, BigDecimal.valueOf(listing.getPrice()));
+                    stmt.setString(5, listing.getDescription());
+                    stmt.setString(6, listing.getCondition().toUpperCase(java.util.Locale.ROOT).replace(' ', '_'));
+                    if (listing.getLendingDuration() == null) stmt.setNull(7, Types.INTEGER);
+                    else stmt.setInt(7, listing.getLendingDuration());
+                    stmt.setString(8, listing.getLendingUnit() == null ? null : listing.getLendingUnit().name());
+                    stmt.setString(9, listing.getMeetupLocation());
+                    stmt.setString(10, id);
+                    if (stmt.executeUpdate() != 1) {
+                        conn.rollback();
+                        return false;
+                    }
+                }
+                //replace the photo set in the same transaction, including when all were removed
+                try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM listing_photos WHERE listing_id = ?")) {
+                    stmt.setString(1, id);
+                    stmt.executeUpdate();
+                }
+                insertPhotos(conn, id, listing.getPhotos() == null ? List.of() : listing.getPhotos());
+                conn.commit();
+                return true;
             } catch (SQLException | RuntimeException failure) {
                 try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
                 throw failure;
