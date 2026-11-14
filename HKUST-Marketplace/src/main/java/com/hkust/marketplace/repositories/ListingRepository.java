@@ -285,22 +285,26 @@ public class ListingRepository {
      *
      * @return true when the listing existed, was not already removed and was updated
      */
-    public boolean removeListing(String listingId, String username) throws SQLException {
+    public boolean removeListing(String listingId, String username, String reason) throws SQLException {
         if (listingId == null || listingId.isBlank()) {
             throw new IllegalArgumentException("A listing ID is required.");
         }
         if (username == null || username.isBlank()) {
             throw new IllegalArgumentException("A seller username is required.");
         }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("A reason is required.");
+        }
         String sql = """
                 UPDATE listings
-                SET listingStatus = 'REMOVED'
+                SET listingStatus = 'REMOVED', rejection_reason = ?
                 WHERE id = ? AND seller_username = ? AND listingStatus <> 'REMOVED'
                 """;
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, listingId);
-            stmt.setString(2, username.trim());
+            stmt.setString(1,reason);
+            stmt.setString(2, listingId);
+            stmt.setString(3, username.trim());
             return stmt.executeUpdate() > 0;
         }
     }

@@ -242,12 +242,23 @@ public class AdminDashboardController {
             remove.setOnAction(e -> {
                 Alert conf = new Alert(Alert.AlertType.CONFIRMATION,
                         "Remove this listing? It will be marked as REMOVED and hidden from all listing views.");
-                conf.showAndWait().ifPresent(r -> {
-                    if (r == ButtonType.OK) {
-                        removeListing(l);
-                        //DummyDataService.getInstance().removeListing(l.getId());
-                        showAllListings();
-                    }
+                conf.showAndWait().ifPresent(a -> {
+                    if (a == ButtonType.OK) {
+                        TextInputDialog reasonDialog = new TextInputDialog();
+                        reasonDialog.setTitle("Removal Reason");
+                        reasonDialog.setHeaderText("Please provide a reason for removal");
+                        reasonDialog.setContentText("Reason:");
+                        reasonDialog.showAndWait().ifPresent(reason -> {
+                            if (reason.isBlank()) {
+                                new Alert(Alert.AlertType.WARNING, "Reason is required.").showAndWait();
+                                return;
+                            }
+
+                            removeListing(l,reason.trim());
+                            //DummyDataService.getInstance().removeListing(l.getId());
+                            showAllListings();
+                        });
+                    };
                 });
             });
 
@@ -578,9 +589,9 @@ public class AdminDashboardController {
         }
     }
     //Soft delete: the row, photos and history stay; the listing is hidden from all views.
-    private void removeListing(Listing target){
+    private void removeListing(Listing target, String reason){
         try{
-            boolean removed = listingRepository.removeListing(target.getId(), target.getSellerUsername());
+            boolean removed = listingRepository.removeListing(target.getId(), target.getSellerUsername(),reason);
             if (!removed) {
                 new Alert(Alert.AlertType.WARNING,
                         "This listing no longer exists or was already removed.").showAndWait();
