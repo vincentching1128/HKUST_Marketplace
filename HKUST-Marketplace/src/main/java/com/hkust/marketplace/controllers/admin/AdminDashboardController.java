@@ -242,6 +242,7 @@ public class AdminDashboardController {
             remove.setOnAction(e -> {
                 Alert conf = new Alert(Alert.AlertType.CONFIRMATION,
                         "Remove this listing? It will be marked as REMOVED and hidden from all listing views.");
+                conf.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
                 conf.showAndWait().ifPresent(a -> {
                     if (a == ButtonType.OK) {
                         TextInputDialog reasonDialog = new TextInputDialog();
