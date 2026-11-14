@@ -240,7 +240,8 @@ public class AdminDashboardController {
             Button remove = new Button("Remove");
             remove.getStyleClass().addAll("btn-danger", "btn-sm");
             remove.setOnAction(e -> {
-                Alert conf = new Alert(Alert.AlertType.CONFIRMATION, "Permanently remove this listing?");
+                Alert conf = new Alert(Alert.AlertType.CONFIRMATION,
+                        "Remove this listing? It will be marked as REMOVED and hidden from all listing views.");
                 conf.showAndWait().ifPresent(r -> {
                     if (r == ButtonType.OK) {
                         removeListing(l);
@@ -576,12 +577,19 @@ public class AdminDashboardController {
             previews.getChildren().add(preview);
         }
     }
+    //Soft delete: the row, photos and history stay; the listing is hidden from all views.
     private void removeListing(Listing target){
         try{
-            listingRepository.removeListing(target.getId(),target.getSellerUsername());
-        }catch(IllegalArgumentException rea){
-            LOGGER.log(Level.SEVERE, "Failed to remove listing " + target.getId(), rea);
-            new Alert(Alert.AlertType.ERROR, "The listing is null.").showAndWait();
+            boolean removed = listingRepository.removeListing(target.getId(), target.getSellerUsername());
+            if (!removed) {
+                new Alert(Alert.AlertType.WARNING,
+                        "This listing no longer exists or was already removed.").showAndWait();
+                return;
+            }
+            new Alert(Alert.AlertType.INFORMATION, "Listing removed.").showAndWait();
+        }catch(IllegalArgumentException invalid){
+            LOGGER.log(Level.WARNING, "Invalid listing removal request.", invalid);
+            new Alert(Alert.AlertType.WARNING, invalid.getMessage()).showAndWait();
         }catch(SQLException ex){
             LOGGER.log(Level.SEVERE, "Failed to remove listing " + target.getId(), ex);
             new Alert(Alert.AlertType.ERROR, "Unable to remove this listing. Please try again.").showAndWait();

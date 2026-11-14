@@ -135,6 +135,7 @@ public class ListingRepository {
                 SELECT l.*, u.full_name AS seller_full_name
                 FROM listings l
                 JOIN users u ON u.username = l.seller_username
+                WHERE l.listingStatus <> 'REMOVED'
                 ORDER BY l.posted_at ASC, l.id ASC
                 """;
         try (Connection conn = DatabaseManager.getConnection();
@@ -159,6 +160,7 @@ public class ListingRepository {
                 FROM listings l
                 JOIN users u ON u.username = l.seller_username
                 WHERE l.seller_username = ?
+                  AND l.listingStatus <> 'REMOVED'
                 ORDER BY l.posted_at DESC, l.id DESC
                 """;
         try (Connection conn = DatabaseManager.getConnection();
@@ -183,6 +185,8 @@ public class ListingRepository {
      * Returns every listing with the given status, oldest first.
      * Used by the admin review screen with {@link ListingStatus#PENDING_REVIEW},
      * and reusable for other status filters (e.g. an "all live listings" view).
+     * Removed listings are never returned, even when asking for
+     * {@link ListingStatus#REMOVED}.
      */
     public List<Listing> findByStatus(ListingStatus status) throws SQLException {
         if (status == null) {
@@ -195,6 +199,7 @@ public class ListingRepository {
                 FROM listings l
                 JOIN users u ON u.username = l.seller_username
                 WHERE l.listingStatus = ?
+                  AND l.listingStatus <> 'REMOVED'
                 ORDER BY l.posted_at ASC, l.id ASC
                 """;
         try (Connection conn = DatabaseManager.getConnection();
@@ -215,7 +220,8 @@ public class ListingRepository {
 
     public Listing findByIdAndSeller(String id, String sellerUsername) throws SQLException {
         String sql = "SELECT l.*, u.full_name AS seller_full_name FROM listings l "
-                + "JOIN users u ON u.username = l.seller_username WHERE l.id = ? AND l.seller_username = ?";
+                + "JOIN users u ON u.username = l.seller_username WHERE l.id = ? AND l.seller_username = ?"
+                + " AND l.listingStatus <> 'REMOVED'";
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, id);
@@ -272,28 +278,33 @@ public class ListingRepository {
             return stmt.executeUpdate() > 0;
         }
     }
-    public void removeListing(String listingId, String username)
-            throws SQLException {
+
+    /**
+     * Soft delete: marks one owned listing as REMOVED, keeping its row, photos and history.
+     * Removed listings are excluded from every find method in this repository.
+     *
+     * @return true when the listing existed, was not already removed and was updated
+     */
+    public boolean removeListing(String listingId, String username) throws SQLException {
         if (listingId == null || listingId.isBlank()) {
             throw new IllegalArgumentException("A listing ID is required.");
         }
-        String name = username == null ? null : username.trim();
         if (username == null || username.isBlank()) {
-            throw new IllegalArgumentException("A username is required.");
+            throw new IllegalArgumentException("A seller username is required.");
         }
-
         String sql = """
                 UPDATE listings
-                SET listingStatus = REMOVED
-                WHERE id = ? AND seller_username = ?
+                SET listingStatus = 'REMOVED'
+                WHERE id = ? AND seller_username = ? AND listingStatus <> 'REMOVED'
                 """;
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, listingId);
-            stmt.setString(2, name);
-            stmt.executeUpdate();
+            stmt.setString(2, username.trim());
+            return stmt.executeUpdate() > 0;
         }
     }
+
 
     //lock the owned row so a concurrent status change cannot slip past the check
     private void lockChangeableListing(Connection conn, String id, String seller) throws SQLException {
