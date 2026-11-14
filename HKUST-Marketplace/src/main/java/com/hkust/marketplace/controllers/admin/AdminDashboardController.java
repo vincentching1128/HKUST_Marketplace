@@ -96,22 +96,68 @@ public class AdminDashboardController {
         contentPane.getChildren().add(scroll);
     }
 
+    //Review card: every field the admin needs before approving or rejecting a submission.
     private VBox createPendingCard(Listing l) {
-        VBox card = new VBox(10);
+        VBox card = new VBox(12);
         card.getStyleClass().add("card");
         card.setPadding(new Insets(16));
 
+        //title on the left, current status on the right
         Label title = new Label(l.getTitle());
+        title.setWrapText(true);
         title.setStyle("-fx-font-weight: bold; -fx-font-size: 16px;");
+        HBox.setHgrow(title, Priority.ALWAYS);
 
-        Label meta = new Label(String.format("Seller: %s (@%s)  ·  %s  ·  %s  ·  %s",
-                l.getSellerFullName(), l.getSellerUsername(),
-                l.getCategory(), l.getTypeDisplay(), l.getMeetupLocation()));
-        meta.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
+        Label status = new Label(l.getStatus().name().replace('_', ' '));
+        status.getStyleClass().add("badge");
+        switch (l.getStatus()) {
+            case LIVE -> status.getStyleClass().add("badge-live");
+            case PENDING_REVIEW -> status.getStyleClass().add("badge-pending");
+            case REJECTED -> status.getStyleClass().add("badge-rejected");
+            default -> status.getStyleClass().add("badge-sold");
+        }
+        Region headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        HBox header = new HBox(10, title, headerSpacer, status);
+        header.setAlignment(Pos.CENTER_LEFT);
 
-        Label submitted = new Label("Submitted: " +
-                l.getPostedAt().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm")));
-        submitted.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
+        //all submission details in one label/value grid
+        GridPane details = new GridPane();
+        details.setHgap(12);
+        details.setVgap(4);
+        addDetailRow(details, 0, "Seller username", "@" + l.getSellerUsername());
+        addDetailRow(details, 1, "Seller full name", l.getSellerFullName());
+        addDetailRow(details, 2, "Category", l.getCategory());
+        addDetailRow(details, 3, "Listing type", l.getTypeDisplay());
+        addDetailRow(details, 4, "Meet-up location", l.getMeetupLocation());
+        addDetailRow(details, 5, "Submitted", l.getPostedAt() == null ? null
+                : l.getPostedAt().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm")));
+
+        //photos uploaded by the seller (0-6), shown as thumbnails
+        VBox photosBox = new VBox(6);
+        Label photosTitle = new Label("Photos");
+        photosTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: #1a1a2e;");
+        FlowPane gallery = new FlowPane(8, 8);
+        List<byte[]> photos = l.getPhotos();
+        if (photos == null || photos.isEmpty()) {
+            Label noPhotos = new Label("No photos uploaded.");
+            noPhotos.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 12px;");
+            gallery.getChildren().add(noPhotos);
+        } else {
+            for (byte[] photo : photos) {
+                if (photo == null || photo.length == 0) continue;
+                Image image = new Image(new ByteArrayInputStream(photo), 140, 105, true, true);
+                if (image.isError()) continue; //skip a blob that is not a readable image
+                ImageView view = new ImageView(image);
+                view.setFitWidth(140);
+                view.setFitHeight(105);
+                view.setPreserveRatio(true);
+                VBox tile = new VBox(view);
+                tile.setAlignment(Pos.CENTER);
+                gallery.getChildren().add(tile);
+            }
+        }
+        photosBox.getChildren().addAll(photosTitle, gallery);
 
         HBox actions = new HBox(10);
         Button approve = new Button("Approve");
@@ -163,14 +209,26 @@ public class AdminDashboardController {
         });
 
         actions.getChildren().addAll(approve, reject);
-        card.getChildren().addAll(title, meta, submitted, actions);
+        card.getChildren().addAll(header, details, photosBox, actions);
         return card;
+    }
+
+    //one label/value pair in the review card grid
+    private void addDetailRow(GridPane grid, int row, String label, String value) {
+        Label name = new Label(label + ":");
+        name.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
+        Label text = new Label(value == null || value.isBlank() ? "—" : value);
+        text.setStyle("-fx-text-fill: #1a1a2e; -fx-font-size: 12px;");
+        text.setWrapText(true);
+        grid.add(name, 0, row);
+        grid.add(text, 1, row);
     }
     //handle the approval of listing in database
     private void approve_listing(Listing target){
         try{
-            if(!listingRepository.updateReview(target.getId(),ListingStatus.LIVE,null)){
-                new Alert(Alert.AlertType.ERROR, "This listing no longer exists.").showAndWait();
+            if(!listingRepository.updateReview(target.getId(), ListingStatus.LIVE, null, target.getRowVersion())){
+                new Alert(Alert.AlertType.WARNING,
+                        "This listing changed while you were reviewing it. The review queue will reload.").showAndWait();
             }
 
         }catch(SQLException ex){
@@ -181,8 +239,9 @@ public class AdminDashboardController {
     }
     private void reject_listing(Listing target, String reason){
         try{
-            if(!listingRepository.updateReview(target.getId(),ListingStatus.REJECTED,reason)){
-                new Alert(Alert.AlertType.ERROR, "This listing no longer exists.").showAndWait();
+            if(!listingRepository.updateReview(target.getId(), ListingStatus.REJECTED, reason, target.getRowVersion())){
+                new Alert(Alert.AlertType.WARNING,
+                        "This listing changed while you were reviewing it. The review queue will reload.").showAndWait();
             }
         }catch(IllegalArgumentException invalidReason){
             new Alert(Alert.AlertType.WARNING, invalidReason.getMessage()).showAndWait();
