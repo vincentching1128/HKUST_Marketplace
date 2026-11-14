@@ -592,7 +592,9 @@ public class AdminDashboardController {
     //Soft delete: the row, photos and history stay; the listing is hidden from all views.
     private void removeListing(Listing target, String reason){
         try{
-            boolean removed = listingRepository.removeListing(target.getId(), target.getSellerUsername(),reason);
+            //the service checks the signed-in admin before changing the listing
+            boolean removed = listingService.removeListingAsAdmin(
+                    SessionManager.getCurrentUser(), target.getId(), target.getSellerUsername(), reason);
             if (!removed) {
                 new Alert(Alert.AlertType.WARNING,
                         "This listing no longer exists or was already removed.").showAndWait();

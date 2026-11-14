@@ -43,6 +43,19 @@ public class ListingService {
         return current;
     }
 
+    //check the stored role rather than trusting the account details held by the screen
+    private User requireAdmin(User user) throws SQLException {
+        if (user == null || user.getUsername() == null || user.getUsername().isBlank()) {
+            throw new IllegalArgumentException("An admin account is required.");
+        }
+        User current = userRepository.findByUsername(user.getUsername());
+        if (current == null || current.getRole() != UserRole.ADMIN) {
+            throw new IllegalArgumentException("An admin account is required.");
+        }
+        //admin active status is not part of this permission check
+        return current;
+    }
+
     //admin actions re-read the account so a demoted/deactivated admin is rejected
     private User requireActiveAdmin(User user) throws SQLException {
         User current = user == null || user.getUsername() == null
@@ -101,6 +114,26 @@ public class ListingService {
         if (!listingRepository.updateAsAdmin(id, changes)) {
             throw new IllegalArgumentException("Listing not found.");
         }
+    }
+
+    /** Admin removal entry point; returns whether an existing listing was marked Removed. */
+    public boolean removeListingAsAdmin(User admin, String listingId, String sellerUsername,
+                                       String reason) throws SQLException {
+        //TODO: call requireAdmin before accessing the listing repository
+        requireAdmin(admin);
+        //TODO: validate the listing ID, seller username, and nonblank removal reason
+        if (reason == null || reason.isBlank()){
+            throw new IllegalArgumentException("Removal reason cannot be blank !");
+        }
+
+        if (listingId == null || listingId.isBlank()) {
+            throw new IllegalArgumentException("A listing ID is required.");
+        }
+        if (sellerUsername == null || sellerUsername.isBlank()) {
+            throw new IllegalArgumentException("A seller username is required.");
+        }
+        //TODO: return listingRepository.removeListing(...) with the trimmed reason
+        return listingRepository.removeListing(listingId, sellerUsername, reason);
     }
 
     //load an owned listing in any status; edit/delete apply their extra checks separately
