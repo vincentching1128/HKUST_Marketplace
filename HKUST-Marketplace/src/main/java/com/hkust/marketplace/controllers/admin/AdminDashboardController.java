@@ -726,6 +726,7 @@ public class AdminDashboardController {
                 Alert conf = new Alert(Alert.AlertType.CONFIRMATION,
                         "Permanently delete user @" + u.getUsername()
                                 + "? Their listings will be marked as REMOVED.");
+                conf.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
                 conf.showAndWait().ifPresent(r -> {
                     if (r == ButtonType.OK) {
                         deleteUser(u);
@@ -762,8 +763,11 @@ public class AdminDashboardController {
     private void deleteUser(User u) {
         try {
             userRepository.deleteUser(u.getUsername());
-            new Alert(Alert.AlertType.INFORMATION,
-                    "User @" + u.getUsername() + " deleted permanently. Their listings were marked as REMOVED.").showAndWait();
+            Alert conf = new Alert(Alert.AlertType.INFORMATION,
+                    "User @" + u.getUsername() + " deleted permanently. Their listings were marked as REMOVED.");
+            conf.setResizable(true);
+            conf.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+            conf.showAndWait();
             showUsers();
         } catch (IllegalArgumentException ex) {
             LOGGER.log(Level.WARNING, "User could not be deleted: " + u.getUsername(), ex);

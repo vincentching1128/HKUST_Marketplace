@@ -192,7 +192,7 @@ public class UserRepository {
         }
         String markListingsRemoved = """
                 UPDATE listings
-                SET seller_username = 'DELETED', listingStatus = 'REMOVED', rejection_reason = 'User account deleted',
+                SET listingStatus = 'REMOVED', rejection_reason = 'User account deleted',
                     row_version = row_version + 1
                 WHERE seller_username = ? AND listingStatus <> 'REMOVED'
                 """;
