@@ -242,10 +242,16 @@ public class ListingRepository {
      * Approving with {@link ListingStatus#LIVE} clears any old rejection reason; rejecting
      * requires a non-blank reason (the table CHECK enforces the same rule).
      *
-     * @return true when the listing exists and was updated
+     * The update only succeeds while the listing is still PENDING_REVIEW and its
+     * row_version still equals the version the admin reviewed, so a seller edit or a
+     * second admin decision between loading the queue and deciding is detected instead
+     * of approving content nobody reviewed.
+     *
+     * @param expectedRowVersion row_version the admin saw when the listing was loaded
+     * @return true when the listing was still pending with that version and was updated
      */
-    public boolean updateReview(String listingId, ListingStatus status, String rejectionReason)
-            throws SQLException {
+    public boolean updateReview(String listingId, ListingStatus status, String rejectionReason,
+                                long expectedRowVersion) throws SQLException {
         if (listingId == null || listingId.isBlank()) {
             throw new IllegalArgumentException("A listing ID is required.");
         }
@@ -265,8 +271,9 @@ public class ListingRepository {
 
         String sql = """
                 UPDATE listings
-                SET listingStatus = ?, reviewed_at = ?, rejection_reason = ?
-                WHERE id = ?
+                SET listingStatus = ?, reviewed_at = ?, rejection_reason = ?,
+                    row_version = row_version + 1
+                WHERE id = ? AND listingStatus = 'PENDING_REVIEW' AND row_version = ?
                 """;
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -275,6 +282,7 @@ public class ListingRepository {
             if (reason == null) stmt.setNull(3, Types.VARCHAR);
             else stmt.setString(3, reason);
             stmt.setString(4, listingId);
+            stmt.setLong(5, expectedRowVersion);
             return stmt.executeUpdate() > 0;
         }
     }
@@ -297,7 +305,8 @@ public class ListingRepository {
         }
         String sql = """
                 UPDATE listings
-                SET listingStatus = 'REMOVED', rejection_reason = ?
+                SET listingStatus = 'REMOVED', rejection_reason = ?,
+                    row_version = row_version + 1
                 WHERE id = ? AND seller_username = ? AND listingStatus <> 'REMOVED'
                 """;
         try (Connection conn = DatabaseManager.getConnection();
@@ -331,7 +340,7 @@ public class ListingRepository {
                 UPDATE listings SET itemName = ?, category = ?, listingType = ?, price = ?,
                     description = ?, item_condition = ?, lending_duration = ?, lending_unit = ?,
                     meetup_location = ?, listingStatus = 'PENDING_REVIEW', reviewed_at = NULL,
-                    rejection_reason = NULL
+                    rejection_reason = NULL, row_version = row_version + 1
                 WHERE id = ? AND seller_username = ?
                 """;
         try (Connection conn = DatabaseManager.getConnection()) {
@@ -380,7 +389,7 @@ public class ListingRepository {
                 UPDATE listings SET itemName = ?, category = ?, listingType = ?, price = ?,
                     description = ?, item_condition = ?, lending_duration = ?, lending_unit = ?,
                     meetup_location = ?, listingStatus = 'PENDING_REVIEW',
-                    reviewed_at = NULL, rejection_reason = NULL
+                    reviewed_at = NULL, rejection_reason = NULL, row_version = row_version + 1
                 WHERE id = ?
                 """;
         try (Connection conn = DatabaseManager.getConnection()) {
@@ -469,6 +478,7 @@ public class ListingRepository {
         listing.setReviewedAt(reviewedAt == null ? null : reviewedAt.toLocalDateTime());
         listing.setRejectionReason(rs.getString("rejection_reason"));
         listing.setViewCount(rs.getInt("view_count"));
+        listing.setRowVersion(rs.getLong("row_version"));
         return listing;
     }
 

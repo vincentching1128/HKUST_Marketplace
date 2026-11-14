@@ -226,8 +226,9 @@ public class AdminDashboardController {
     //handle the approval of listing in database
     private void approve_listing(Listing target){
         try{
-            if(!listingRepository.updateReview(target.getId(),ListingStatus.LIVE,null)){
-                new Alert(Alert.AlertType.ERROR, "This listing no longer exists.").showAndWait();
+            if(!listingRepository.updateReview(target.getId(), ListingStatus.LIVE, null, target.getRowVersion())){
+                new Alert(Alert.AlertType.WARNING,
+                        "This listing changed while you were reviewing it. The review queue will reload.").showAndWait();
             }
 
         }catch(SQLException ex){
@@ -238,8 +239,9 @@ public class AdminDashboardController {
     }
     private void reject_listing(Listing target, String reason){
         try{
-            if(!listingRepository.updateReview(target.getId(),ListingStatus.REJECTED,reason)){
-                new Alert(Alert.AlertType.ERROR, "This listing no longer exists.").showAndWait();
+            if(!listingRepository.updateReview(target.getId(), ListingStatus.REJECTED, reason, target.getRowVersion())){
+                new Alert(Alert.AlertType.WARNING,
+                        "This listing changed while you were reviewing it. The review queue will reload.").showAndWait();
             }
         }catch(IllegalArgumentException invalidReason){
             new Alert(Alert.AlertType.WARNING, invalidReason.getMessage()).showAndWait();

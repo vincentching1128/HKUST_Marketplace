@@ -26,6 +26,7 @@ public class Listing {
     private LocalDateTime reviewedAt;
     private String rejectionReason;
     private int viewCount;
+    private long rowVersion = 1;       // optimistic-lock column: bumped by every update
     private List<byte[]> photos = new ArrayList<>(); //actual image data, with up to six photos
 
     public Listing() {
@@ -97,6 +98,9 @@ public class Listing {
 
     public int getViewCount() { return viewCount; }
     public void setViewCount(int viewCount) { this.viewCount = viewCount; }
+
+    public long getRowVersion() { return rowVersion; }
+    public void setRowVersion(long rowVersion) { this.rowVersion = rowVersion; }
 
     public List<byte[]> getPhotos() { return photos; }
     public void setPhotos(List<byte[]> photos) { this.photos = photos; }
