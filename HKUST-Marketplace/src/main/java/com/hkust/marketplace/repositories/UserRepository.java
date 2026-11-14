@@ -178,6 +178,49 @@ public class UserRepository {
         return users;
     }
 
+    /**
+     * Permanently deletes a buyer/seller account. Their listings are first marked REMOVED
+     * and the user row is deleted in the same transaction; the listings foreign key uses
+     * ON DELETE SET NULL, so the retained listings become orphaned instead of blocking the
+     * delete. Admin accounts cannot be removed here.
+     *
+     * @throws IllegalArgumentException when the username is missing, unknown or an admin
+     */
+    public void deleteUser(String username) throws SQLException {
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("A username is required.");
+        }
+        String markListingsRemoved = """
+                UPDATE listings
+                SET listingStatus = 'REMOVED', rejection_reason = 'User account deleted',
+                    row_version = row_version + 1
+                WHERE seller_username = ? AND listingStatus <> 'REMOVED'
+                """;
+        String deleteUser = "DELETE FROM users WHERE username = ? AND role <> 'ADMIN'";
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement stmt = conn.prepareStatement(markListingsRemoved)) {
+                    stmt.setString(1, username.trim());
+                    stmt.executeUpdate();
+                }
+                int deleted;
+                try (PreparedStatement stmt = conn.prepareStatement(deleteUser)) {
+                    stmt.setString(1, username.trim());
+                    deleted = stmt.executeUpdate();
+                }
+                if (deleted != 1) {
+                    conn.rollback();
+                    throw new IllegalArgumentException("User not found or account cannot be deleted.");
+                }
+                conn.commit();
+            } catch (SQLException | RuntimeException failure) {
+                try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+                throw failure;
+            }
+        }
+    }
+
     //TO BE IMPLEMENTED
 
 }

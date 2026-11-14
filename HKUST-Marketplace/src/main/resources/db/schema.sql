@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS listings (
     -- listing with id as key, seller username (being referenced) and other item info
     -- depending on the type as well
     id VARCHAR(50) PRIMARY KEY,
-    seller_username VARCHAR(50) NOT NULL,
+    -- NULL once the seller account is hard-deleted; the listing row is kept as REMOVED
+    seller_username VARCHAR(50) NULL,
     itemName VARCHAR(255) NOT NULL,
     category VARCHAR(100) NOT NULL,
     listingType ENUM('SELL', 'LEND', 'GIVEAWAY') NOT NULL,
@@ -46,7 +47,9 @@ CREATE TABLE IF NOT EXISTS listings (
     CONSTRAINT chk_listing_id_not_blank
     CHECK (CHAR_LENGTH(TRIM(id)) > 0),
     CONSTRAINT fk_listings_seller
-    FOREIGN KEY (seller_username) REFERENCES users(username),
+    FOREIGN KEY (seller_username) REFERENCES users(username)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
     CONSTRAINT chk_itemname_not_blank
     CHECK (CHAR_LENGTH(TRIM(itemName)) > 0),
     CONSTRAINT chk_category_not_blank
