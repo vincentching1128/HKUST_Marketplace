@@ -626,6 +626,10 @@ public class AdminDashboardController {
             dbError.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
             dbError.setWrapText(true);
             root.getChildren().add(dbError);
+            //display the error before returning, since the content pane was cleared above
+            ScrollPane scroll = new ScrollPane(root);
+            scroll.setFitToWidth(true);
+            contentPane.getChildren().add(scroll);
             return;
         }
 
