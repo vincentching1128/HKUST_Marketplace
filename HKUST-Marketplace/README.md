@@ -1,5 +1,8 @@
 # HKUST Marketplace — Frontend Demo / Skeleton
 
+Buyer Browse and Listing Detail now use MySQL. See [Buyer listings](BUYER-LISTINGS.md)
+for the report-table migration, implemented features, and verification steps.
+
 A complete **JavaFX + Maven** frontend-only demo of the HKUST Campus Marketplace platform.  
 Designed as a **skeleton / starter code** for students to implement the full project requirements (backend, persistence, real business logic, etc.).
 
