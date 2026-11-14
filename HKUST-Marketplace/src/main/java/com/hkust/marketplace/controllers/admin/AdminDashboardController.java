@@ -724,10 +724,11 @@ public class AdminDashboardController {
             delete.getStyleClass().addAll("btn-danger", "btn-sm");
             delete.setOnAction(e -> {
                 Alert conf = new Alert(Alert.AlertType.CONFIRMATION,
-                        "Permanently delete user @" + u.getUsername() + "?");
+                        "Permanently delete user @" + u.getUsername()
+                                + "? Their listings will be marked as REMOVED.");
                 conf.showAndWait().ifPresent(r -> {
                     if (r == ButtonType.OK) {
-                        deactivateUser(u);
+                        deleteUser(u);
                     }
                 });
             });
@@ -757,19 +758,21 @@ public class AdminDashboardController {
         }
     }
 
-    /** "Delete" is a safe deactivation in this demo, now persisted to MySQL. */
-    private void deactivateUser(User u) {
+    /** "Delete" permanently removes the account; its listings stay in the database as REMOVED. */
+    private void deleteUser(User u) {
         try {
-            userRepository.setActive(u.getUsername(), false);
-            new Alert(Alert.AlertType.INFORMATION, "User deactivated (demo safety).").showAndWait();
+            userRepository.deleteUser(u.getUsername());
+            new Alert(Alert.AlertType.INFORMATION,
+                    "User @" + u.getUsername() + " deleted permanently. Their listings were marked as REMOVED.").showAndWait();
+            showUsers();
+        } catch (IllegalArgumentException ex) {
+            LOGGER.log(Level.WARNING, "User could not be deleted: " + u.getUsername(), ex);
+            new Alert(Alert.AlertType.WARNING, ex.getMessage()).showAndWait();
             showUsers();
         } catch (SQLException ex) {
-            LOGGER.log(Level.SEVERE, "Failed to deactivate account.", ex);
+            LOGGER.log(Level.SEVERE, "Failed to delete account.", ex);
             new Alert(Alert.AlertType.ERROR,
-                    "Unable to update the account status. Please try again.").showAndWait();
-        } catch (IllegalArgumentException ex) {
-            new Alert(Alert.AlertType.ERROR, "User not found in database: " + u.getUsername()).showAndWait();
-            showUsers();
+                    "Unable to delete the account. Please try again.").showAndWait();
         }
     }
     private void openEditUserDialog(String username) {
