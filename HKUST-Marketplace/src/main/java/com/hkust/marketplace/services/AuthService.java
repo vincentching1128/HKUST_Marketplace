@@ -56,6 +56,19 @@ public class AuthService {
         return new LoginResult(LoginStatus.SUCCESS, user);
     }
 
+    //check the stored caller role before allowing permanent account deletion
+    public void deleteUserAsAdmin(User admin, String username) throws SQLException {
+        if (admin == null || admin.getUsername() == null || admin.getUsername().isBlank()) {
+            throw new IllegalArgumentException("An admin account is required to delete users.");
+        }
+        User current = users.findByUsername(admin.getUsername());
+        if (current == null || current.getRole() != UserRole.ADMIN) {
+            throw new IllegalArgumentException("An admin account is required to delete users.");
+        }
+        //the repository validates the target and refuses to delete admin accounts
+        users.deleteUser(username);
+    }
+
     public void register(User user, String password) throws SQLException {
         requireStrongPassword(password);
         user.setUsername(user.getUsername().trim().toLowerCase(Locale.ROOT));

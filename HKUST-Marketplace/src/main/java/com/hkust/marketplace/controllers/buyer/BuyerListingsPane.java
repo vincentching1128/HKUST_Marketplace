@@ -84,13 +84,11 @@ public class BuyerListingsPane extends VBox {
                 new Label("Type:"), type, new Label("Condition:"), condition);
         FlowPane prices = new FlowPane(10, 10, new Label("Sale price:"), minimum, maximum,
                 new Label("Sort:"), sort);
-        Label hint = new Label("Price ranges apply to sale listings. Unpriced items appear last when sorting by price.");
-        hint.setWrapText(true);
         validation.setStyle("-fx-text-fill: #b3261e;");
         validation.setWrapText(true);
         validation.setVisible(false);
         validation.managedProperty().bind(validation.visibleProperty());
-        browse.getChildren().addAll(firstRow, filters, prices, hint, validation, results);
+        browse.getChildren().addAll(firstRow, filters, prices, validation, results);
         search.setOnAction(event -> applyFilters());
         minimum.setOnAction(event -> applyFilters());
         maximum.setOnAction(event -> applyFilters());

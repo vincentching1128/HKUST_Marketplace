@@ -762,7 +762,8 @@ public class AdminDashboardController {
     /** "Delete" permanently removes the account; its listings stay in the database as REMOVED. */
     private void deleteUser(User u) {
         try {
-            userRepository.deleteUser(u.getUsername());
+            new AuthService(userRepository).deleteUserAsAdmin(
+                    SessionManager.getCurrentUser(), u.getUsername());
             Alert conf = new Alert(Alert.AlertType.INFORMATION,
                     "User @" + u.getUsername() + " deleted permanently. Their listings were marked as REMOVED.");
             conf.setResizable(true);
