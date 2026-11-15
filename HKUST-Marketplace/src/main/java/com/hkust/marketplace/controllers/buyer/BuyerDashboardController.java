@@ -1,11 +1,10 @@
 package com.hkust.marketplace.controllers.buyer;
 
-import com.hkust.marketplace.models.Listing;
-import com.hkust.marketplace.models.ListingType;
 import com.hkust.marketplace.models.Notification;
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.BuyerListingService;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -15,8 +14,6 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
 import java.time.format.DateTimeFormatter;
 import java.sql.SQLException;
@@ -33,6 +30,7 @@ public class BuyerDashboardController {
     @FXML private Button btnBrowse, btnDeals, btnHistory, btnFavourites, btnNotifications, btnProfile;
 
     private Button currentActiveBtn;
+    private BuyerListingsPane listingsPane;
 
     @FXML
     public void initialize() {
@@ -56,153 +54,12 @@ public class BuyerDashboardController {
     @FXML
     private void showBrowse() {
         setActive(btnBrowse, "Browse Marketplace");
-        contentPane.getChildren().clear();
-
-        VBox root = new VBox(16);
-        root.setPadding(new Insets(4));
-
-        // Filter bar
-        HBox filterBar = new HBox(12);
-        filterBar.setAlignment(Pos.CENTER_LEFT);
-        ComboBox<String> categoryFilter = new ComboBox<>(FXCollections.observableArrayList("All Categories"));
-        categoryFilter.getItems().addAll(DummyDataService.CATEGORIES);
-        categoryFilter.getSelectionModel().selectFirst();
-        ComboBox<String> typeFilter = new ComboBox<>(FXCollections.observableArrayList("All Types", "Sell", "Lend", "Giveaway"));
-        typeFilter.getSelectionModel().selectFirst();
-        TextField searchField = new TextField();
-        searchField.setPromptText("Search listings...");
-        searchField.setPrefWidth(220);
-        Button searchBtn = new Button("Search");
-        searchBtn.getStyleClass().addAll("btn-primary", "btn-sm");
-        filterBar.getChildren().addAll(
-                new Label("Category:"), categoryFilter,
-                new Label("Type:"), typeFilter,
-                searchField, searchBtn
-        );
-        root.getChildren().add(filterBar);
-
-        // Listing grid
-        FlowPane grid = new FlowPane(16, 16);
-        grid.setPrefWrapLength(900);
-
-        List<Listing> live = DummyDataService.getInstance().getLiveListings();
-        if (live.isEmpty()) {
-            Label empty = new Label("No live listings at the moment.");
-            empty.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 15px;");
-            root.getChildren().add(empty);
-        } else {
-            for (Listing listing : live) {
-                grid.getChildren().add(createListingCard(listing));
-            }
-            root.getChildren().add(grid);
+        if (listingsPane == null) {
+            listingsPane = new BuyerListingsPane(new BuyerListingService(),
+                    SessionManager::getCurrentUser, pageTitle::setText);
         }
-
-        ScrollPane scroll = new ScrollPane(root);
-        scroll.setFitToWidth(true);
-        scroll.setStyle("-fx-background-color: transparent;");
-        contentPane.getChildren().add(scroll);
-    }
-
-    private VBox createListingCard(Listing listing) {
-        VBox card = new VBox(8);
-        card.getStyleClass().add("listing-card");
-        card.setPrefWidth(260);
-        card.setMinHeight(200);
-
-        // Type badge + price
-        HBox top = new HBox();
-        top.setAlignment(Pos.CENTER_LEFT);
-        Label typeBadge = new Label(listing.getTypeDisplay());
-        typeBadge.getStyleClass().add("badge");
-        if (listing.getType() == ListingType.SELL) typeBadge.getStyleClass().add("badge-sold");
-        else if (listing.getType() == ListingType.LEND) typeBadge.getStyleClass().add("badge-pending");
-        else typeBadge.getStyleClass().add("badge-live");
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        Label price = new Label(listing.getPriceDisplay());
-        price.setStyle("-fx-font-weight: bold; -fx-text-fill: #003974; -fx-font-size: 16px;");
-        top.getChildren().addAll(typeBadge, spacer, price);
-
-        Label title = new Label(listing.getTitle());
-        title.setStyle("-fx-font-weight: bold; -fx-font-size: 15px; -fx-text-fill: #1a1a2e;");
-        title.setWrapText(true);
-
-        Label meta = new Label(listing.getCategory() + " · " + listing.getCondition());
-        meta.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
-
-        Label seller = new Label("Seller: " + listing.getSellerFullName());
-        seller.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
-
-        Label location = new Label("📍 " + listing.getMeetupLocation());
-        location.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
-
-        Label date = new Label("Posted: " + listing.getPostedAt().format(DateTimeFormatter.ofPattern("dd MMM yyyy")));
-        date.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
-
-        Button actionBtn = new Button();
-        actionBtn.getStyleClass().addAll("btn-primary", "btn-sm");
-        switch (listing.getType()) {
-            case SELL -> {
-                actionBtn.setText("Make Offer");
-                actionBtn.setOnAction(e -> showOfferDialog(listing));
-            }
-            case LEND -> {
-                actionBtn.setText("Request Borrow");
-                actionBtn.setOnAction(e -> showBorrowDialog(listing));
-            }
-            case GIVEAWAY -> {
-                actionBtn.setText("Claim Item");
-                actionBtn.setOnAction(e -> claimItem(listing));
-            }
-        }
-
-        card.getChildren().addAll(top, title, meta, seller, location, date, actionBtn);
-        return card;
-    }
-
-    private void showOfferDialog(Listing listing) {
-        TextInputDialog dialog = new TextInputDialog(String.valueOf(listing.getPrice() != null ? listing.getPrice() : 0));
-        dialog.setTitle("Make an Offer");
-        dialog.setHeaderText("Offer for: " + listing.getTitle());
-        dialog.setContentText("Your offer price (HK$):");
-        dialog.showAndWait().ifPresent(priceStr -> {
-            try {
-                double price = Double.parseDouble(priceStr);
-                Alert alert = new Alert(Alert.AlertType.INFORMATION);
-                alert.setTitle("Offer Submitted");
-                alert.setHeaderText(null);
-                alert.setContentText("Your offer of HK$" + price + " has been sent to " + listing.getSellerFullName() + ".\n\n(Demo only – no backend)");
-                alert.showAndWait();
-            } catch (NumberFormatException ex) {
-                new Alert(Alert.AlertType.ERROR, "Invalid price.").showAndWait();
-            }
-        });
-    }
-
-    private void showBorrowDialog(Listing listing) {
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Borrow Request");
-        alert.setHeaderText("Request to borrow: " + listing.getTitle());
-        alert.setContentText("Proposed duration: " + listing.getLendingDurationDisplay() +
-                "\n\nSend borrow request to seller?");
-        alert.showAndWait().ifPresent(resp -> {
-            if (resp == ButtonType.OK) {
-                new Alert(Alert.AlertType.INFORMATION, "Borrow request sent!\n(Demo only)").showAndWait();
-            }
-        });
-    }
-
-    private void claimItem(Listing listing) {
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Claim Item");
-        alert.setHeaderText("Claim: " + listing.getTitle());
-        alert.setContentText("Are you sure you want to claim this giveaway item?");
-        alert.showAndWait().ifPresent(resp -> {
-            if (resp == ButtonType.OK) {
-                new Alert(Alert.AlertType.INFORMATION, "Item claimed successfully!\n(Demo only)").showAndWait();
-            }
-        });
+        contentPane.getChildren().setAll(listingsPane);
+        listingsPane.showBrowse();
     }
 
     @FXML
