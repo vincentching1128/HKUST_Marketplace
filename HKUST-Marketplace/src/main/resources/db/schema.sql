@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS notifications(
     title VARCHAR(50) NOT NULL,
     message VARCHAR(2000) NOT NULL,
     timestamp DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    isRead BOOLEAN NOT NULL DEFAULT TRUE,
+    isRead BOOLEAN NOT NULL DEFAULT FALSE,
 
     INDEX idx_notifications_recipient (username, timestamp),
     INDEX idx_notifications_unread (username, isRead),
@@ -137,6 +137,45 @@ CREATE TABLE IF NOT EXISTS notifications(
 );
 
 CREATE TABLE IF NOT EXISTS deals(
+    id VARCHAR(50) PRIMARY KEY,
+    buyer_username VARCHAR(50) NOT NULL,
+    seller_username VARCHAR(50) NOT NULL,
+    listing_id VARCHAR(50) NOT NULL,
+    dealType ENUM('BOUGHT','BORROWED','RECEIVED') NOT NULL,
+    status ENUM('CANCELLED','RETURNED','ACTIVE','COMPLETED') NOT NULL DEFAULT 'ACTIVE',
+    offeredPrice DECIMAL(10,2) NULL,
+    counterOfferPrice DECIMAL(10,2) NULL,
+    borrowStartDate DATETIME(6) NULL,
+    borrowDueDate DATETIME(6) NULL,
+    counterBorrowStart DATETIME(6) NULL,
+    counterDueEnd DATETIME(6) NULL,
+    returnedDate DATETIME(6) NULL,
+    createdDate DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    completedDate DATETIME(6) NULL,
+
+    INDEX idx_deals_buyer_status (buyer_username, status),
+    INDEX idx_deals_seller_status (seller_username, status),
+    INDEX idx_deals_status_created (status, createdDate),
+
+    CONSTRAINT chk_deals_distinct_parties
+        CHECK (buyer_username <> seller_username),
+    CONSTRAINT chk_deals_offered_price_nonnegative
+        CHECK (offeredPrice IS NULL OR offeredPrice >= 0),
+    CONSTRAINT chk_deals_counter_price_nonnegative
+        CHECK (counterOfferPrice IS NULL OR counterOfferPrice >= 0),
+    CONSTRAINT chk_deals_borrow_dates
+        CHECK (borrowDueDate IS NULL OR borrowStartDate IS NULL OR borrowDueDate >= borrowStartDate),
+    CONSTRAINT chk_deals_counter_borrow_dates
+        CHECK (counterDueEnd IS NULL OR counterBorrowStart IS NULL OR counterDueEnd >= counterBorrowStart),
+    CONSTRAINT chk_deals_completed_date
+        CHECK (status <> 'COMPLETED' OR completedDate IS NOT NULL),
+
+    CONSTRAINT fk_deals_buyer_user FOREIGN KEY (buyer_username)
+        REFERENCES users(username) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_deals_seller_user FOREIGN KEY (seller_username)
+        REFERENCES users(username) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_deals_item FOREIGN KEY (listing_id)
+        REFERENCES listings(id) ON UPDATE CASCADE ON DELETE CASCADE
 
 );
 -- ============================================================
