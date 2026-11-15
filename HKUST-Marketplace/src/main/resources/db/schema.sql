@@ -114,6 +114,31 @@ CREATE TABLE IF NOT EXISTS listing_reports (
     CONSTRAINT chk_listing_report_reason CHECK (CHAR_LENGTH(TRIM(reason)) BETWEEN 1 AND 2000)
 );
 
+CREATE TABLE IF NOT EXISTS notifications(
+    id VARCHAR(50) PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    title VARCHAR(50) NOT NULL,
+    message VARCHAR(2000) NOT NULL,
+    timestamp DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    isRead BOOLEAN NOT NULL DEFAULT TRUE,
+
+    INDEX idx_notifications_recipient (username, timestamp),
+    INDEX idx_notifications_unread (username, isRead),
+
+    CONSTRAINT fk_notifications_user FOREIGN KEY (username)
+        REFERENCES users(username) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT chk_notification_category_not_blank
+        CHECK (CHAR_LENGTH(TRIM(category)) > 0),
+    CONSTRAINT chk_notification_title_not_blank
+        CHECK (CHAR_LENGTH(TRIM(title)) > 0),
+    CONSTRAINT chk_notification_message_not_blank
+        CHECK (CHAR_LENGTH(TRIM(message)) > 0)
+);
+
+CREATE TABLE IF NOT EXISTS deals(
+
+);
 -- ============================================================
 -- Seed demo accounts (same credentials as the in-memory demo).
 -- Passwords are salted Argon2id hashes. Demo login passwords remain
