@@ -82,7 +82,7 @@ public class BuyerListingService {
         Comparator<BigDecimal> prices = sort == SortOrder.PRICE_DESC
                 ? Comparator.reverseOrder() : Comparator.naturalOrder();
         Comparator<Listing> order = sort == null || sort == SortOrder.NEWEST ? newest
-                : Comparator.comparing(BuyerListingService::salePrice,
+                : Comparator.comparing(BuyerListingService::sortPrice,
                         Comparator.nullsLast(prices)).thenComparing(newest);
         return Objects.requireNonNull(source).stream()
                 .filter(listing -> listing.getStatus() == ListingStatus.LIVE)
@@ -112,6 +112,12 @@ public class BuyerListingService {
 
     private static String normalized(String value) {
         return value == null ? "" : value.strip().toLowerCase(Locale.ROOT);
+    }
+
+    //listings without a sale price sort as zero, including lending and giveaways
+    private static BigDecimal sortPrice(Listing listing) {
+        BigDecimal price = salePrice(listing);
+        return price == null ? BigDecimal.ZERO : price;
     }
 
     private static BigDecimal salePrice(Listing listing) {
