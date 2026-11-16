@@ -2,6 +2,7 @@ package com.hkust.marketplace.controllers.seller;
 
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.utils.DummyDataService;
@@ -35,6 +36,7 @@ import java.util.ArrayList;
 public class SellerDashboardController {
     private final UserRepository userRepository = new UserRepository();
     private final ListingService listingService = new ListingService();
+    private final NotificationRepository notificationRepository = new NotificationRepository();
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
     @FXML private Label welcomeLabel;
@@ -822,6 +824,8 @@ public class SellerDashboardController {
                 }
                 pass.clear();
                 welcomeLabel.setText("Hello, " + sessionUser.getFullName());
+                notifyAccountChange("Seller Profile Updated",
+                        "@" + sessionUser.getUsername() + " updated their seller profile.");
                 new Alert(Alert.AlertType.INFORMATION, "profile saved").showAndWait();
             } catch (IllegalArgumentException invalidPassword){
                 new Alert(Alert.AlertType.WARNING, invalidPassword.getMessage()).showAndWait();
@@ -837,6 +841,15 @@ public class SellerDashboardController {
                 new Label("Preferred Meet-up"), meetup,
                 save);
         contentPane.getChildren().add(form);
+    }
+
+    /** Best-effort admin audit notification for account changes. */
+    private void notifyAccountChange(String title, String message) {
+        try {
+            notificationRepository.notifyAllAdmins("Account", title, message);
+        } catch (SQLException | IllegalArgumentException ex) {
+            System.err.println("Failed to create account-change notification: " + ex.getMessage());
+        }
     }
 
     @FXML

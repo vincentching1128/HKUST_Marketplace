@@ -3,6 +3,7 @@ package com.hkust.marketplace.controllers.buyer;
 import com.hkust.marketplace.models.Notification;
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.BuyerListingService;
 import com.hkust.marketplace.utils.DummyDataService;
@@ -23,6 +24,7 @@ public class BuyerDashboardController {
 
     private final UserRepository userRepository = new UserRepository();
     private final AuthService authService = new AuthService(userRepository);
+    private final NotificationRepository notificationRepository = new NotificationRepository();
 
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
@@ -280,6 +282,8 @@ public class BuyerDashboardController {
                 newPass.clear();
                 confirmPass.clear();
                 welcomeLabel.setText("Hello, " + fullName);
+                notifyAccountChange("Buyer Profile Updated",
+                        "@" + sessionUser.getUsername() + " updated their buyer profile.");
                 new Alert(Alert.AlertType.INFORMATION, "Profile updated successfully.").showAndWait();
             } catch (IllegalArgumentException invalidPassword) {
                 new Alert(Alert.AlertType.WARNING, invalidPassword.getMessage()).showAndWait();
@@ -296,6 +300,15 @@ public class BuyerDashboardController {
                 saveBtn);
 
         contentPane.getChildren().add(form);
+    }
+
+    /** Best-effort admin audit notification for account changes. */
+    private void notifyAccountChange(String title, String message) {
+        try {
+            notificationRepository.notifyAllAdmins("Account", title, message);
+        } catch (SQLException | IllegalArgumentException ex) {
+            System.err.println("Failed to create account-change notification: " + ex.getMessage());
+        }
     }
 
     @FXML

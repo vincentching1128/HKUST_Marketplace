@@ -750,6 +750,10 @@ public class AdminDashboardController {
         try {
             userRepository.setActive(u.getUsername(), newState);
             System.out.println("Toggled @" + u.getUsername() + " -> active=" + newState);
+            String action = newState ? "Activated" : "Deactivated";
+            notifyAccountChange("Account " + action,
+                    actingAdmin() + " " + action.toLowerCase(Locale.ROOT)
+                            + " account @" + u.getUsername() + ".");
             showUsers(); //re-read from DB so the badge reflects the stored value
         } catch (SQLException ex) {
             LOGGER.log(Level.SEVERE, "Failed to update account status.", ex);
@@ -766,6 +770,9 @@ public class AdminDashboardController {
         try {
             new AuthService(userRepository).deleteUserAsAdmin(
                     SessionManager.getCurrentUser(), u.getUsername());
+            notifyAccountChange("User Account Deleted",
+                    actingAdmin() + " permanently deleted account @" + u.getUsername()
+                            + "; their notifications were removed.");
             Alert conf = new Alert(Alert.AlertType.INFORMATION,
                     "User @" + u.getUsername() + " deleted permanently. Their listings were marked as REMOVED.");
             conf.setResizable(true);
@@ -782,6 +789,26 @@ public class AdminDashboardController {
                     "Unable to delete the account. Please try again.").showAndWait();
         }
     }
+
+    /**
+     * Best-effort admin audit notification: a notification failure must not undo the
+     * account change that has already been committed.
+     */
+    private void notifyAccountChange(String title, String message) {
+        try {
+            notificationRepository.notifyAllAdmins("Account", title, message);
+        } catch (SQLException ex) {
+            LOGGER.log(Level.WARNING, "Failed to create account-change notification.", ex);
+        } catch (IllegalArgumentException invalid) {
+            LOGGER.log(Level.WARNING, "Invalid account-change notification.", invalid);
+        }
+    }
+
+    private String actingAdmin() {
+        User admin = SessionManager.getCurrentUser();
+        return admin == null ? "An admin" : "@" + admin.getUsername();
+    }
+
     private void openEditUserDialog(String username) {
         // 1. Load the target account fresh from the database (the row in the list may be stale).
         User target;
@@ -900,6 +927,8 @@ public class AdminDashboardController {
                     dialog.close();
                     return;
                 }
+                notifyAccountChange("User Account Updated",
+                        actingAdmin() + " updated the account @" + target.getUsername() + ".");
                 new Alert(Alert.AlertType.INFORMATION, "Profile saved.").showAndWait();
             } catch (SQLException ex) {
                 new Alert(Alert.AlertType.ERROR,
@@ -1149,6 +1178,8 @@ public class AdminDashboardController {
                 }
                 pass.clear();
                 welcomeLabel.setText("Admin: " + fullname);
+                notifyAccountChange("Admin Profile Updated",
+                        actingAdmin() + " updated their admin profile.");
                 new Alert(Alert.AlertType.INFORMATION, "Profile updated.").showAndWait();
             }catch(IllegalArgumentException invalidPassword){
                 new Alert(Alert.AlertType.WARNING, invalidPassword.getMessage()).showAndWait();

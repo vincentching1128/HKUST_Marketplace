@@ -16,8 +16,9 @@ import java.util.UUID;
 /**
  * Database access for per-recipient notifications.
  * <p>
- * Implemented: {@link #create(Notification)}, {@link #findByRecipient(String)} and
- * {@link #markAsRead(String)}. Still planned:
+ * Implemented: {@link #create(Notification)}, {@link #findByRecipient(String)},
+ * {@link #markAsRead(String)} and {@link #notifyAllAdmins(String, String, String)}.
+ * Still planned:
  * <ul>
  *   <li>countUnread(username) / markAllRead(username)</li>
  *   <li>deleteForUser(username) is handled by the users FK ON DELETE CASCADE</li>
@@ -114,6 +115,32 @@ public class NotificationRepository {
             stmt.setString(1, notificationId);
             return stmt.executeUpdate() > 0;
         }
+    }
+
+    /**
+     * Creates the same notification for every active admin account (admin audit feed:
+     * listing submissions, account changes, reports).
+     *
+     * @return the number of admin notifications created
+     */
+    public int notifyAllAdmins(String category, String title, String message) throws SQLException {
+        String safeCategory = requiredText(category, "A notification category", MAX_CATEGORY);
+        String safeTitle = requiredText(title, "A notification title", MAX_TITLE);
+        String safeMessage = requiredText(message, "A notification message", MAX_MESSAGE);
+
+        List<String> admins = new ArrayList<>();
+        String sql = "SELECT username FROM users WHERE role = 'ADMIN' AND active = TRUE ORDER BY username";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                admins.add(rs.getString("username"));
+            }
+        }
+        for (String admin : admins) {
+            create(new Notification(admin, safeTitle, safeMessage, safeCategory));
+        }
+        return admins.size();
     }
 
     private Notification mapRow(ResultSet rs) throws SQLException {
