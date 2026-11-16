@@ -110,8 +110,8 @@ public class BuyerListingRepository {
         }
     }
 
-    /** A successful return means the report was committed against a currently visible listing. */
-    public void reportListing(String buyer, String listingId, String reason) throws SQLException {
+    /** Returns the reported listing title after committing, without counting another view. */
+    public String reportListing(String buyer, String listingId, String reason) throws SQLException {
         try (Connection connection = connections.getConnection()) {
             connection.setAutoCommit(false);
             try {
@@ -149,6 +149,7 @@ public class BuyerListingRepository {
                     statement.executeUpdate();
                 }
                 connection.commit();
+                return title;
             } catch (SQLException | RuntimeException failure) {
                 rollback(connection, failure);
                 throw failure;

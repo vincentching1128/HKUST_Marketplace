@@ -31,7 +31,8 @@ public class NotificationRepository {
     private static final int MAX_USERNAME = 50;
     private static final int MAX_CATEGORY = 50;
     private static final int MAX_TITLE = 50;
-    private static final int MAX_MESSAGE = 2000;
+    // Allow a full 2,000-character report reason plus listing and reporter details.
+    private static final int MAX_MESSAGE = 4000;
 
     /**
      * Inserts one notification for its recipient. A missing id and timestamp are filled
@@ -156,7 +157,7 @@ public class NotificationRepository {
         return notification;
     }
 
-    //keep the values inside the VARCHAR limits declared in schema.sql
+    // Keep text within the application limits and schema column capacities.
     private static String requiredText(String value, String label, int maxLength) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(label + " is required.");

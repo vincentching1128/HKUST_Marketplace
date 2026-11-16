@@ -61,9 +61,8 @@ public class BuyerListingService {
             throw new IllegalArgumentException("Please enter a report reason of 1 to 2,000 characters.");
         }
         // The repository rechecks the buyer and listing while holding database locks.
-        listings.reportListing(buyer.getUsername(), id, trimmed);
-        Listing l = listings.findVisibleById(id);
-        notifyAdminsOfReportListing(l.getTitle(), buyer.getUsername(), buyer.getUsername(),
+        String listingTitle = listings.reportListing(buyer.getUsername(), id, trimmed);
+        notifyAdminsOfReportListing(listingTitle, buyer.getUsername(), buyer.getUsername(),
                 "Listing Reported", trimmed);
     }
 
