@@ -16,10 +16,10 @@ import java.util.UUID;
 /**
  * Database access for per-recipient notifications.
  * <p>
- * Implemented: {@link #create(Notification)}. Still planned:
+ * Implemented: {@link #create(Notification)}, {@link #findByRecipient(String)} and
+ * {@link #markAsRead(String)}. Still planned:
  * <ul>
- *   <li>findByRecipient(username) - newest first (uses idx_notifications_recipient)</li>
- *   <li>countUnread(username) / markRead(id) / markAllRead(username)</li>
+ *   <li>countUnread(username) / markAllRead(username)</li>
  *   <li>deleteForUser(username) is handled by the users FK ON DELETE CASCADE</li>
  * </ul>
  * Column names to map: {@code isRead} to {@link Notification#isRead()} and
@@ -74,9 +74,60 @@ public class NotificationRepository {
             }
         }
     }
-    public void markAsRead(String id){
-
+    /** Newest-first inbox for one recipient (uses idx_notifications_recipient). */
+    public List<Notification> findByRecipient(String username) throws SQLException {
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("A recipient username is required.");
+        }
+        String sql = """
+                SELECT id, username, category, title, message, timestamp, isRead
+                FROM notifications
+                WHERE username = ?
+                ORDER BY timestamp DESC, id ASC
+                """;
+        List<Notification> notifications = new ArrayList<>();
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, username.trim());
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    notifications.add(mapRow(rs));
+                }
+            }
+        }
+        return notifications;
     }
+
+    /**
+     * Marks one notification as read.
+     *
+     * @return true when an unread notification with that id was changed
+     */
+    public boolean markAsRead(String notificationId) throws SQLException {
+        if (notificationId == null || notificationId.isBlank()) {
+            throw new IllegalArgumentException("A notification ID is required.");
+        }
+        String sql = "UPDATE notifications SET isRead = TRUE WHERE id = ? AND isRead = FALSE";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, notificationId);
+            return stmt.executeUpdate() > 0;
+        }
+    }
+
+    private Notification mapRow(ResultSet rs) throws SQLException {
+        Notification notification = new Notification();
+        notification.setId(rs.getString("id"));
+        notification.setUsername(rs.getString("username"));
+        notification.setCategory(rs.getString("category"));
+        notification.setTitle(rs.getString("title"));
+        notification.setMessage(rs.getString("message"));
+        Timestamp timestamp = rs.getTimestamp("timestamp");
+        notification.setTimestamp(timestamp == null ? null : timestamp.toLocalDateTime());
+        notification.setRead(rs.getBoolean("isRead"));
+        return notification;
+    }
+
     //keep the values inside the VARCHAR limits declared in schema.sql
     private static String requiredText(String value, String label, int maxLength) {
         if (value == null || value.isBlank()) {
