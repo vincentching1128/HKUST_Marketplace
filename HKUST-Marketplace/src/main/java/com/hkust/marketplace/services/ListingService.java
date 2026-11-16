@@ -3,6 +3,7 @@ package com.hkust.marketplace.services;
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.ListingRepository;
+import com.hkust.marketplace.repositories.NotificationRepository;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -17,14 +18,22 @@ import com.hkust.marketplace.utils.DummyDataService;
 public class ListingService {
     private final UserRepository userRepository;
     private final ListingRepository listingRepository;
+    private final NotificationRepository notificationRepository;
 
     public ListingService() {
-        this(new UserRepository(), new ListingRepository());
+        this(new UserRepository(), new ListingRepository(), new NotificationRepository());
     }
 
+    /** Kept for existing callers; notifications use the default repository. */
     public ListingService(UserRepository userRepository, ListingRepository listingRepository) {
+        this(userRepository, listingRepository, new NotificationRepository());
+    }
+
+    public ListingService(UserRepository userRepository, ListingRepository listingRepository,
+                          NotificationRepository notificationRepository) {
         this.userRepository = Objects.requireNonNull(userRepository);
         this.listingRepository = Objects.requireNonNull(listingRepository);
+        this.notificationRepository = Objects.requireNonNull(notificationRepository);
     }
 
     //use the signed-in account, rather than accepting a seller name from the screen
@@ -79,11 +88,13 @@ public class ListingService {
         listing.setRejectionReason(null);
         listing.setViewCount(0);
         listingRepository.create(listing);
+        notifyAdminsOfPendingListing(listing.getTitle(), current.getUsername(), current.getUsername(),
+                "New Listing Submitted");
     }
 
     /** Admin action: create a listing on behalf of an active seller; it starts Pending Review. */
     public void createListingAsAdmin(User admin, String sellerUsername, Listing listing) throws SQLException {
-        requireActiveAdmin(admin);
+        User currentAdmin = requireActiveAdmin(admin);
         validateListing(listing);
         User seller = sellerUsername == null || sellerUsername.isBlank()
                 ? null : userRepository.findByUsername(sellerUsername);
@@ -100,6 +111,8 @@ public class ListingService {
         listing.setRejectionReason(null);
         listing.setViewCount(0);
         listingRepository.create(listing);
+        notifyAdminsOfPendingListing(listing.getTitle(), seller.getUsername(), currentAdmin.getUsername(),
+                "Listing Created by Admin");
     }
 
     /** Admin action: edit any listing's content; it returns to Pending Review for re-approval. */
@@ -143,6 +156,9 @@ public class ListingService {
         Listing existing = getListing(user, id);
         checkCanChange(existing);
         listingRepository.updateOwned(id, current.getUsername(), changes);
+        //an edit sends the listing back to Pending Review, so the admins must re-review it
+        notifyAdminsOfPendingListing(changes.getTitle(), current.getUsername(), current.getUsername(),
+                "Listing Resubmitted for Review");
     }
 
     public void deleteListing(User user, String id) throws SQLException {
@@ -150,6 +166,24 @@ public class ListingService {
         Listing existing = getListing(user, id);
         checkCanChange(existing);
         listingRepository.deleteOwned(id, current.getUsername());
+    }
+
+    /**
+     * Creates a "New Listing" notification for every active admin (except the admin who
+     * performed the action) so the review queue is visible from the notification board.
+     * Called after a listing has been saved in Pending Review.
+     */
+    private void notifyAdminsOfPendingListing(String listingTitle, String sellerUsername,
+                                              String actorUsername, String notificationTitle)
+            throws SQLException {
+        String message = "Listing '" + listingTitle + "' by @" + sellerUsername
+                + " is waiting for review.";
+        for (User admin : userRepository.findAll()) {
+            if (admin.getRole() != UserRole.ADMIN || !admin.isActive()) continue;
+            if (actorUsername != null && admin.getUsername().equalsIgnoreCase(actorUsername)) continue;
+            notificationRepository.create(new Notification(
+                    admin.getUsername(), notificationTitle, message, "New Listing"));
+        }
     }
 
     //check before opening the edit form and again before saving or deleting
