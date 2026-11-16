@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS deals(
     seller_username VARCHAR(50) NOT NULL,
     listing_id VARCHAR(50) NOT NULL,
     dealType ENUM('BOUGHT','BORROWED','RECEIVED') NOT NULL,
-    status ENUM('CANCELLED','RETURNED','ACTIVE','COMPLETED') NOT NULL DEFAULT 'ACTIVE',
+    status ENUM('PENDING','COUNTERED','ACCEPTED','DECLINED','CANCELLED','COMPLETED','RETURNED') NOT NULL DEFAULT 'PENDING',
     offeredPrice DECIMAL(10,2) NULL,
     counterOfferPrice DECIMAL(10,2) NULL,
     borrowStartDate DATETIME(6) NULL,
@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS deals(
     returnedDate DATETIME(6) NULL,
     createdDate DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     completedDate DATETIME(6) NULL,
+    row_version BIGINT NOT NULL DEFAULT 1,
 
     INDEX idx_deals_buyer_status (buyer_username, status),
     INDEX idx_deals_seller_status (seller_username, status),

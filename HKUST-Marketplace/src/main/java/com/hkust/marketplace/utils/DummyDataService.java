@@ -134,7 +134,7 @@ public class DummyDataService {
         d1.setBuyerUsername("alice");
         d1.setSellerUsername("charlie");
         d1.setDealType(ListingType.SELL);
-        d1.setStatus("Accepted");
+        d1.setStatus(DealStatus.ACCEPTED);
         d1.setOfferPrice(160.0);
         deals.add(d1);
 
