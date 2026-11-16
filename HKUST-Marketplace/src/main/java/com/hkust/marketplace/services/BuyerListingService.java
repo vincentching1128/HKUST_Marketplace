@@ -1,12 +1,10 @@
 package com.hkust.marketplace.services;
 
-import com.hkust.marketplace.models.Listing;
-import com.hkust.marketplace.models.ListingStatus;
-import com.hkust.marketplace.models.ListingType;
-import com.hkust.marketplace.models.User;
-import com.hkust.marketplace.models.UserRole;
+import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.BuyerListingRepository;
+import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.repositories.UserRepository;
+
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
@@ -27,14 +25,16 @@ public class BuyerListingService {
 
     private final UserRepository users;
     private final BuyerListingRepository listings;
+    private final NotificationRepository notificationRepository;
 
     public BuyerListingService() {
-        this(new UserRepository(), new BuyerListingRepository());
+        this(new UserRepository(), new BuyerListingRepository(), new NotificationRepository());
     }
 
-    public BuyerListingService(UserRepository users, BuyerListingRepository listings) {
+    public BuyerListingService(UserRepository users, BuyerListingRepository listings, NotificationRepository notificationRepository) {
         this.users = Objects.requireNonNull(users);
         this.listings = Objects.requireNonNull(listings);
+        this.notificationRepository = Objects.requireNonNull(notificationRepository);
     }
 
     public List<Listing> getLiveListings(User user) throws SQLException {
@@ -62,6 +62,9 @@ public class BuyerListingService {
         }
         // The repository rechecks the buyer and listing while holding database locks.
         listings.reportListing(buyer.getUsername(), id, trimmed);
+        Listing l = listings.findVisibleById(id);
+        notifyAdminsOfReportListing(l.getTitle(), buyer.getUsername(), buyer.getUsername(),
+                "Listing Reported", trimmed);
     }
 
     /** Apply combined controls without changing the loaded list or its objects. */
@@ -137,6 +140,20 @@ public class BuyerListingService {
         if (value != null && (value.signum() < 0 || value.compareTo(new BigDecimal("99999999.99")) > 0
                 || value.stripTrailingZeros().scale() > 2)) {
             throw new IllegalArgumentException("Price bounds must be between HK$0 and HK$99,999,999.99 with at most two decimal places.");
+        }
+    }
+
+    private void notifyAdminsOfReportListing(String listingTitle, String buyerUsername,
+                                              String actorUsername, String notificationTitle, String reason)
+            throws SQLException {
+        String message = "Listing '" + listingTitle + "' is reported by @" + buyerUsername + System.lineSeparator() +
+                "Reason:" + reason;
+
+        for (User admin : users.findAll()) {
+            if (admin.getRole() != UserRole.ADMIN || !admin.isActive()) continue;
+            if (actorUsername != null && admin.getUsername().equalsIgnoreCase(actorUsername)) continue;
+            notificationRepository.create(new Notification(
+                    admin.getUsername(), notificationTitle, message, "Listing Report"));
         }
     }
 }

@@ -10,7 +10,7 @@ public class Deal {
     private String buyerUsername;
     private String sellerUsername;
     private ListingType dealType;
-    private String status; // Pending, Accepted, Completed, Returned, Cancelled
+    private String status; // Active, Completed, Returned, Cancelled
     private Double offerPrice;
     private LocalDate borrowStart;
     private LocalDate borrowEnd;
