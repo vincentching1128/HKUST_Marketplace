@@ -257,6 +257,15 @@ public class DummyDataService {
     }
 
     public void addDeal(Deal deal) {
+        if (deal == null || deal.getBuyerUsername() == null
+                || deal.getBuyerUsername().isBlank()
+                || deal.getSellerUsername() == null
+                || deal.getSellerUsername().isBlank()) {
+            throw new IllegalArgumentException("Deal buyer and seller are required.");
+        }
+        if (deal.getBuyerUsername().equalsIgnoreCase(deal.getSellerUsername())) {
+            throw new IllegalArgumentException("Deal buyer and seller must be different users.");
+        }
         if (deal.getId() == null) {
             deal.setId("D" + dealIdCounter.getAndIncrement());
         }

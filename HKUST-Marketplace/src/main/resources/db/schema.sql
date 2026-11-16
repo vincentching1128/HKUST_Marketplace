@@ -157,8 +157,6 @@ CREATE TABLE IF NOT EXISTS deals(
     INDEX idx_deals_seller_status (seller_username, status),
     INDEX idx_deals_status_created (status, createdDate),
 
-    CONSTRAINT chk_deals_distinct_parties
-        CHECK (buyer_username <> seller_username),
     CONSTRAINT chk_deals_offered_price_nonnegative
         CHECK (offeredPrice IS NULL OR offeredPrice >= 0),
     CONSTRAINT chk_deals_counter_price_nonnegative
@@ -178,6 +176,8 @@ CREATE TABLE IF NOT EXISTS deals(
         REFERENCES listings(id) ON UPDATE CASCADE ON DELETE CASCADE
 
 );
+
+-- Buyer/seller identity validation belongs in the backend deal service.
 -- ============================================================
 -- Seed demo accounts (same credentials as the in-memory demo).
 -- Passwords are salted Argon2id hashes. Demo login passwords remain
