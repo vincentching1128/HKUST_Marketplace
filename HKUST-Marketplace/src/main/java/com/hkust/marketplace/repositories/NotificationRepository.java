@@ -83,6 +83,7 @@ public class NotificationRepository {
                 SELECT id, username, category, title, message, timestamp, isRead
                 FROM notifications
                 WHERE username = ?
+                    AND isRead <> TRUE
                 ORDER BY timestamp DESC, id ASC
                 """;
         List<Notification> notifications = new ArrayList<>();
