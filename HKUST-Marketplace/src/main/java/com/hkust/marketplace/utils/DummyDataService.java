@@ -134,7 +134,7 @@ public class DummyDataService {
         d1.setBuyerUsername("alice");
         d1.setSellerUsername("charlie");
         d1.setDealType(ListingType.SELL);
-        d1.setStatus("Accepted");
+        d1.setStatus(DealStatus.ACCEPTED);
         d1.setOfferPrice(160.0);
         deals.add(d1);
 
@@ -257,6 +257,15 @@ public class DummyDataService {
     }
 
     public void addDeal(Deal deal) {
+        if (deal == null || deal.getBuyerUsername() == null
+                || deal.getBuyerUsername().isBlank()
+                || deal.getSellerUsername() == null
+                || deal.getSellerUsername().isBlank()) {
+            throw new IllegalArgumentException("Deal buyer and seller are required.");
+        }
+        if (deal.getBuyerUsername().equalsIgnoreCase(deal.getSellerUsername())) {
+            throw new IllegalArgumentException("Deal buyer and seller must be different users.");
+        }
         if (deal.getId() == null) {
             deal.setId("D" + dealIdCounter.getAndIncrement());
         }

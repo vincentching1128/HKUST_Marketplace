@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS notifications(
     username VARCHAR(50) NOT NULL,
     category VARCHAR(50) NOT NULL,
     title VARCHAR(50) NOT NULL,
-    message VARCHAR(2000) NOT NULL,
+    message TEXT NOT NULL,
     timestamp DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     isRead BOOLEAN NOT NULL DEFAULT FALSE,
 
@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS deals(
     seller_username VARCHAR(50) NOT NULL,
     listing_id VARCHAR(50) NOT NULL,
     dealType ENUM('BOUGHT','BORROWED','RECEIVED') NOT NULL,
-    status ENUM('CANCELLED','RETURNED','ACTIVE','COMPLETED') NOT NULL DEFAULT 'ACTIVE',
+    status ENUM('PENDING','COUNTERED','ACCEPTED','DECLINED','CANCELLED','COMPLETED','RETURNED') NOT NULL DEFAULT 'PENDING',
     offeredPrice DECIMAL(10,2) NULL,
     counterOfferPrice DECIMAL(10,2) NULL,
     borrowStartDate DATETIME(6) NULL,
@@ -152,13 +152,12 @@ CREATE TABLE IF NOT EXISTS deals(
     returnedDate DATETIME(6) NULL,
     createdDate DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     completedDate DATETIME(6) NULL,
+    row_version BIGINT NOT NULL DEFAULT 1,
 
     INDEX idx_deals_buyer_status (buyer_username, status),
     INDEX idx_deals_seller_status (seller_username, status),
     INDEX idx_deals_status_created (status, createdDate),
 
-    CONSTRAINT chk_deals_distinct_parties
-        CHECK (buyer_username <> seller_username),
     CONSTRAINT chk_deals_offered_price_nonnegative
         CHECK (offeredPrice IS NULL OR offeredPrice >= 0),
     CONSTRAINT chk_deals_counter_price_nonnegative
@@ -178,6 +177,8 @@ CREATE TABLE IF NOT EXISTS deals(
         REFERENCES listings(id) ON UPDATE CASCADE ON DELETE CASCADE
 
 );
+
+-- Buyer/seller identity validation belongs in the backend deal service.
 -- ============================================================
 -- Seed demo accounts (same credentials as the in-memory demo).
 -- Passwords are salted Argon2id hashes. Demo login passwords remain

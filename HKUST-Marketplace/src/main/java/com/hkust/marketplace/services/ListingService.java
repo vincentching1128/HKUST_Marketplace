@@ -196,9 +196,7 @@ public class ListingService {
         }
         boolean activeOffer = DummyDataService.getInstance().getAllDeals().stream()
                 .anyMatch(deal -> Objects.equals(listing.getId(), deal.getListingId())
-                        && ("Pending".equalsIgnoreCase(deal.getStatus())
-                        || "Accepted".equalsIgnoreCase(deal.getStatus())
-                        || "Countered".equalsIgnoreCase(deal.getStatus())));
+                        && deal.getStatus().isOpen());
         if (activeOffer) throw new IllegalArgumentException("Listings with active offers or requests cannot be edited or deleted.");
     }
 
