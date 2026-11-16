@@ -3,6 +3,7 @@ package com.hkust.marketplace.controllers.admin;
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.ListingRepository;
+import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.utils.DummyDataService;
@@ -46,6 +47,7 @@ public class AdminDashboardController {
     private final UserRepository userRepository = new UserRepository();
     private final ListingRepository listingRepository = new ListingRepository();
     private final ListingService listingService = new ListingService();
+    private final NotificationRepository notificationRepository = new NotificationRepository();
 
     @FXML
     public void initialize() {
@@ -748,6 +750,10 @@ public class AdminDashboardController {
         try {
             userRepository.setActive(u.getUsername(), newState);
             System.out.println("Toggled @" + u.getUsername() + " -> active=" + newState);
+            String action = newState ? "Activated" : "Deactivated";
+            notifyAccountChange("Account " + action,
+                    actingAdmin() + " " + action.toLowerCase(Locale.ROOT)
+                            + " account @" + u.getUsername() + ".");
             showUsers(); //re-read from DB so the badge reflects the stored value
         } catch (SQLException ex) {
             LOGGER.log(Level.SEVERE, "Failed to update account status.", ex);
@@ -764,6 +770,9 @@ public class AdminDashboardController {
         try {
             new AuthService(userRepository).deleteUserAsAdmin(
                     SessionManager.getCurrentUser(), u.getUsername());
+            notifyAccountChange("User Account Deleted",
+                    actingAdmin() + " permanently deleted account @" + u.getUsername()
+                            + "; their notifications were removed.");
             Alert conf = new Alert(Alert.AlertType.INFORMATION,
                     "User @" + u.getUsername() + " deleted permanently. Their listings were marked as REMOVED.");
             conf.setResizable(true);
@@ -780,6 +789,26 @@ public class AdminDashboardController {
                     "Unable to delete the account. Please try again.").showAndWait();
         }
     }
+
+    /**
+     * Best-effort admin audit notification: a notification failure must not undo the
+     * account change that has already been committed.
+     */
+    private void notifyAccountChange(String title, String message) {
+        try {
+            notificationRepository.notifyAllAdmins("Account", title, message);
+        } catch (SQLException ex) {
+            LOGGER.log(Level.WARNING, "Failed to create account-change notification.", ex);
+        } catch (IllegalArgumentException invalid) {
+            LOGGER.log(Level.WARNING, "Invalid account-change notification.", invalid);
+        }
+    }
+
+    private String actingAdmin() {
+        User admin = SessionManager.getCurrentUser();
+        return admin == null ? "An admin" : "@" + admin.getUsername();
+    }
+
     private void openEditUserDialog(String username) {
         // 1. Load the target account fresh from the database (the row in the list may be stale).
         User target;
@@ -898,6 +927,8 @@ public class AdminDashboardController {
                     dialog.close();
                     return;
                 }
+                notifyAccountChange("User Account Updated",
+                        actingAdmin() + " updated the account @" + target.getUsername() + ".");
                 new Alert(Alert.AlertType.INFORMATION, "Profile saved.").showAndWait();
             } catch (SQLException ex) {
                 new Alert(Alert.AlertType.ERROR,
@@ -995,30 +1026,90 @@ public class AdminDashboardController {
     private void showNotifications() {
         setActive(btnNotifications, "Admin Notifications");
         contentPane.getChildren().clear();
+
         VBox root = new VBox(12);
         root.setPadding(new Insets(4));
-        List<Notification> notifs = DummyDataService.getInstance().getNotificationsFor("admin");
-        if (notifs.isEmpty()) {
+
+        User admin = SessionManager.getCurrentUser();
+        if (admin == null) {
+            SceneManager.showAdminLogin();
+            return;
+        }
+
+        List<Notification> notifications;
+        try {
+            notifications = notificationRepository.findByRecipient(admin.getUsername());
+        } catch (SQLException ex) {
+            LOGGER.log(Level.SEVERE, "Failed to load notifications.", ex);
+            Label error = new Label("Unable to load notifications. Please try again.");
+            error.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
+            error.setWrapText(true);
+            Button retry = new Button("Retry");
+            retry.getStyleClass().add("btn-outline");
+            retry.setOnAction(event -> showNotifications());
+            root.getChildren().addAll(error, retry);
+            ScrollPane errorScroll = new ScrollPane(root);
+            errorScroll.setFitToWidth(true);
+            contentPane.getChildren().add(errorScroll);
+            return;
+        }
+
+        if (notifications.isEmpty()) {
             root.getChildren().add(new Label("No notifications."));
         } else {
-            for (Notification n : notifs) {
-                VBox item = new VBox(4);
+            for (Notification n : notifications) {
+                VBox item = new VBox(6);
                 item.getStyleClass().add("notif-item");
-                Label t = new Label(n.getTitle());
-                t.setStyle("-fx-font-weight: bold;");
-                Label m = new Label(n.getMessage());
-                m.setWrapText(true);
-                m.setStyle("-fx-text-fill: #5a5a7a;");
-                Label meta = new Label(n.getCategory() + " · " +
-                        n.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM HH:mm", Locale.ENGLISH)));
+
+                Label title = new Label(n.getTitle());
+                title.setWrapText(true);
+                title.setStyle("-fx-text-fill: #1a1a2e; -fx-font-weight: " + (n.isRead() ? "normal" : "bold") + ";");
+
+                Label message = new Label(n.getMessage());
+                message.setWrapText(true);
+                message.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 13px;");
+
+                Label meta = new Label(n.getCategory() + " · "
+                        + (n.getTimestamp() == null ? "unknown time"
+                        : n.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.ENGLISH))));
                 meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
-                item.getChildren().addAll(t, m, meta);
+
+                Button read = new Button(n.isRead() ? "Read" : "Mark as read");
+                read.getStyleClass().addAll("btn-outline", "btn-sm");
+                read.setDisable(n.isRead());
+                read.setOnAction(event -> markNotificationRead(n));
+
+                Region spacer = new Region();
+                HBox.setHgrow(spacer, Priority.ALWAYS);
+                HBox footer = new HBox(10, meta, spacer, read);
+                footer.setAlignment(Pos.CENTER_LEFT);
+
+                item.getChildren().addAll(title, message, footer);
                 root.getChildren().add(item);
             }
         }
+
         ScrollPane scroll = new ScrollPane(root);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
+    }
+
+    /** Marks one notification read and reloads the board so the button state updates. */
+    private void markNotificationRead(Notification notification) {
+        try {
+            if (!notificationRepository.markAsRead(notification.getId())) {
+                //already read or removed between loading and clicking; refresh to show the truth
+                showNotifications();
+                return;
+            }
+            showNotifications();
+        } catch (IllegalArgumentException invalid) {
+            new Alert(Alert.AlertType.WARNING, invalid.getMessage()).showAndWait();
+        } catch (SQLException ex) {
+            LOGGER.log(Level.SEVERE, "Failed to mark notification as read.", ex);
+            new Alert(Alert.AlertType.ERROR,
+                    "Unable to mark this notification as read. Please try again.").showAndWait();
+        }
     }
 
     @FXML
@@ -1087,6 +1178,8 @@ public class AdminDashboardController {
                 }
                 pass.clear();
                 welcomeLabel.setText("Admin: " + fullname);
+                notifyAccountChange("Admin Profile Updated",
+                        actingAdmin() + " updated their admin profile.");
                 new Alert(Alert.AlertType.INFORMATION, "Profile updated.").showAndWait();
             }catch(IllegalArgumentException invalidPassword){
                 new Alert(Alert.AlertType.WARNING, invalidPassword.getMessage()).showAndWait();

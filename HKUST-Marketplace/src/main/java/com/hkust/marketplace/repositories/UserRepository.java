@@ -197,10 +197,16 @@ public class UserRepository {
                 WHERE seller_username = ? AND listingStatus <> 'REMOVED'
                 """;
         String deleteUser = "DELETE FROM users WHERE username = ? AND role <> 'ADMIN'";
+        String deleteNotifications = "DELETE FROM notifications WHERE username = ?";
         try (Connection conn = DatabaseManager.getConnection()) {
             conn.setAutoCommit(false);
             try {
                 try (PreparedStatement stmt = conn.prepareStatement(markListingsRemoved)) {
+                    stmt.setString(1, username.trim());
+                    stmt.executeUpdate();
+                }
+                //remove the account's notifications in the same transaction (the FK also cascades)
+                try (PreparedStatement stmt = conn.prepareStatement(deleteNotifications)) {
                     stmt.setString(1, username.trim());
                     stmt.executeUpdate();
                 }
