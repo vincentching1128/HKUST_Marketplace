@@ -3,8 +3,12 @@ package com.hkust.marketplace.controllers.buyer;
 import com.hkust.marketplace.models.Listing;
 import com.hkust.marketplace.models.ListingStatus;
 import com.hkust.marketplace.models.ListingType;
+import com.hkust.marketplace.models.Deal;
+import com.hkust.marketplace.models.ChatThread;
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.services.BuyerListingService;
+import com.hkust.marketplace.services.BuyerDealService;
+import com.hkust.marketplace.services.ChatService;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
@@ -15,6 +19,9 @@ import javafx.scene.layout.*;
 
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
@@ -27,8 +34,11 @@ import java.util.function.Supplier;
 public class BuyerListingsPane extends VBox {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm", Locale.ENGLISH);
     private final BuyerListingService service;
+    private final BuyerDealService deals;
+    private final ChatService chats;
     private final Supplier<User> currentUser;
     private final Consumer<String> setTitle;
+    private final Consumer<String> openChat;
     private final TextField search = new TextField();
     private final TextField minimum = new TextField();
     private final TextField maximum = new TextField();
@@ -43,11 +53,20 @@ public class BuyerListingsPane extends VBox {
     private boolean updatingControls;
     private boolean loaded;
     private long requestVersion;
+    private Runnable detailBack = this::showBrowse;
 
     public BuyerListingsPane(BuyerListingService service, Supplier<User> currentUser, Consumer<String> setTitle) {
+        this(service, new BuyerDealService(), new ChatService(), currentUser, setTitle, ignored -> {});
+    }
+
+    public BuyerListingsPane(BuyerListingService service, BuyerDealService deals, ChatService chats,
+                             Supplier<User> currentUser, Consumer<String> setTitle, Consumer<String> openChat) {
         this.service = service;
+        this.deals = deals;
+        this.chats = chats;
         this.currentUser = currentUser;
         this.setTitle = setTitle;
+        this.openChat = openChat;
         setSpacing(14);
         setPadding(new Insets(4));
         buildBrowse();
@@ -98,6 +117,7 @@ public class BuyerListingsPane extends VBox {
     }
 
     public void showBrowse() {
+        detailBack = this::showBrowse;
         setTitle.accept("Browse Marketplace");
         showContent(browse);
         loaded = false;
@@ -201,16 +221,20 @@ public class BuyerListingsPane extends VBox {
         return card;
     }
 
-    /** Entry point for future real My Deals rows, using the saved listing ID. */
     public void showListingDetails(String listingId) {
+        showListingDetails(listingId, this::showBrowse);
+    }
+
+    public void showListingDetails(String listingId, Runnable back) {
+        detailBack = back;
         User user = currentUser.get();
         showContent(new VBox(12, new Label("Loading listing details..."), new ProgressIndicator()));
         runQuery(() -> service.getListing(user, listingId), listing -> {
             setTitle.accept("Listing Details");
-            VBox root = new VBox(14, button("Back to Browse", "btn-outline", this::showBrowse), createDetails(listing));
+            VBox root = new VBox(14, button("Back", "btn-outline", detailBack), createDetails(listing));
             showContent(root);
         }, failure -> {
-            showBrowse();
+            detailBack.run();
             new Alert(Alert.AlertType.WARNING,
                     message(failure, "Unable to load this listing. Please try again.")).showAndWait();
         });
@@ -242,17 +266,124 @@ public class BuyerListingsPane extends VBox {
         };
         Button action = new Button(actionText);
         action.getStyleClass().add("btn-primary");
-        action.setDisable(true);
+        action.setDisable(listing.getStatus() != ListingStatus.LIVE);
+        action.setOnAction(event -> submitProposal(listing));
         Button chat = new Button("Chat");
         chat.getStyleClass().add("btn-outline");
-        chat.setDisable(true);
+        chat.setOnAction(event -> openChat.accept(listing.getId()));
         Label unavailable = wrapped(listing.getStatus() == ListingStatus.LIVE
-                ? "Offers, borrow requests, claims and chat are not available yet."
-                : "This item is currently unavailable. Chat is not available yet.");
+                ? "Proposals are checked again when submitted."
+                : "This item is currently unavailable for new proposals.");
         Button report = button("Report Listing", "btn-danger", () -> reportListing(listing));
         details.getChildren().addAll(new FlowPane(10, 10, action, chat, report), unavailable,
-                button("Refresh Details", "btn-outline", () -> showListingDetails(listing.getId())));
+                button("Refresh Details", "btn-outline", () -> showListingDetails(listing.getId(), detailBack)));
         return details;
+    }
+
+    private record ProposalTerms(Double price, LocalDateTime start, LocalDateTime end) {}
+    private record Submission(Deal deal, boolean sharedInChat) {}
+
+    private void submitProposal(Listing listing) {
+        ProposalTerms terms = proposalDialog(listing);
+        if (terms == null) return;
+        User buyer = currentUser.get();
+        showContent(new VBox(12, new Label("Submitting your proposal..."), new ProgressIndicator()));
+        runQuery(() -> {
+            Deal deal = deals.submit(buyer, listing.getId(), listing.getType(),
+                    terms.price(), terms.start(), terms.end());
+            boolean shared = false;
+            try {
+                ChatThread thread = chats.openForDeal(buyer, deal.getId());
+                chats.sendProposal(buyer, thread.id(), deal.getId());
+                shared = true;
+            } catch (Exception chatFailure) {
+                // The proposal is committed already; report its true outcome to the buyer.
+                System.err.println("Formal chat message could not be shared for deal " + deal.getId()
+                        + ": " + chatFailure.getMessage());
+            }
+            return new Submission(deal, shared);
+        }, submitted -> {
+            showListingDetails(listing.getId(), detailBack);
+            new Alert(Alert.AlertType.INFORMATION, submitted.sharedInChat()
+                    ? "Proposal submitted and shared in chat. View it in My Deals."
+                    : "Proposal submitted. The formal chat message could not be sent; your deal is saved in My Deals.")
+                    .showAndWait();
+        }, failure -> {
+            showContent(new VBox(14, button("Back", "btn-outline", detailBack), createDetails(listing)));
+            new Alert(Alert.AlertType.ERROR, message(failure,
+                    "Unable to submit. Refresh this listing and check My Deals before retrying.")).showAndWait();
+        });
+    }
+
+    private ProposalTerms proposalDialog(Listing listing) {
+        if (listing.getType() == ListingType.GIVEAWAY) {
+            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
+                    "Claim '" + listing.getTitle() + "'? The seller will review your claim.",
+                    ButtonType.OK, ButtonType.CANCEL);
+            return confirm.showAndWait().filter(ButtonType.OK::equals)
+                    .map(ignored -> new ProposalTerms(null, null, null)).orElse(null);
+        }
+        Dialog<ProposalTerms> dialog = new Dialog<>();
+        dialog.setTitle(listing.getType() == ListingType.SELL ? "Make Offer" : "Request Borrow");
+        dialog.setHeaderText(listing.getTitle());
+        ButtonType submit = new ButtonType("Submit", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(submit, ButtonType.CANCEL);
+        VBox form = new VBox(10);
+        form.setPadding(new Insets(10));
+        TextField price = new TextField();
+        LocalDateTime defaultStart = LocalDateTime.now().plusMinutes(1).withSecond(0).withNano(0);
+        DatePicker fromDate = new DatePicker(defaultStart.toLocalDate());
+        DatePicker toDate = new DatePicker(defaultStart.toLocalDate());
+        TextField fromTime = new TextField(defaultStart.toLocalTime().toString() + ":00");
+        TextField toTime = new TextField(defaultStart.plusMinutes(1).toLocalTime().toString() + ":00");
+        Label error = wrapped("");
+        error.setStyle("-fx-text-fill: #c62828;");
+        if (listing.getType() == ListingType.SELL) {
+            price.setPromptText("HK$ amount");
+            form.getChildren().addAll(new Label("Your price offer (HK$)"), price);
+        } else {
+            fromTime.setPromptText("HH:mm:ss");
+            toTime.setPromptText("HH:mm:ss");
+            form.getChildren().addAll(new Label("Start date and time (HH:mm:ss)"),
+                    new HBox(10, fromDate, fromTime), new Label("End date and time (HH:mm:ss)"),
+                    new HBox(10, toDate, toTime), new Label("Minimum borrowing period: 5 seconds."));
+        }
+        form.getChildren().add(error);
+        dialog.getDialogPane().setContent(form);
+        ProposalTerms[] chosen = new ProposalTerms[1];
+        dialog.getDialogPane().lookupButton(submit).addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
+            try {
+                if (listing.getType() == ListingType.SELL) {
+                    BigDecimal amount = new BigDecimal(price.getText().strip());
+                    if (amount.signum() < 0 || amount.compareTo(new BigDecimal("99999999.99")) > 0
+                            || amount.stripTrailingZeros().scale() > 2) throw new IllegalArgumentException();
+                    chosen[0] = new ProposalTerms(amount.doubleValue(), null, null);
+                } else {
+                    LocalDateTime start = readDateTime(fromDate, fromTime);
+                    LocalDateTime end = readDateTime(toDate, toTime);
+                    if (start.isBefore(LocalDateTime.now()) || Duration.between(start, end).compareTo(Duration.ofSeconds(5)) < 0)
+                        throw new IllegalArgumentException("Choose a future borrowing period of at least five seconds.");
+                    chosen[0] = new ProposalTerms(null, start, end);
+                }
+            } catch (RuntimeException invalid) {
+                error.setText(listing.getType() == ListingType.SELL
+                        ? "Enter a valid nonnegative price with at most two decimal places."
+                        : invalid.getMessage());
+                event.consume();
+            }
+        });
+        dialog.setResultConverter(button -> button == submit ? chosen[0] : null);
+        return dialog.showAndWait().orElse(null);
+    }
+
+    private static LocalDateTime readDateTime(DatePicker date, TextField time) {
+        try {
+            if (date.getValue() == null || !time.getText().strip().matches("\\d{2}:\\d{2}:\\d{2}"))
+                throw new IllegalArgumentException();
+            return LocalDateTime.of(date.getValue(), LocalTime.parse(time.getText().strip()));
+        } catch (RuntimeException invalid) {
+            throw new IllegalArgumentException("Choose both dates and enter times as HH:mm:ss.");
+        }
     }
 
     private void reportListing(Listing listing) {
@@ -282,10 +413,10 @@ public class BuyerListingsPane extends VBox {
             // Replace the form while saving so double clicks cannot submit the same report twice.
             showContent(new VBox(12, new Label("Submitting report..."), new ProgressIndicator()));
             runQuery(() -> { service.reportListing(user, listing.getId(), text); return listing; }, saved -> {
-                showContent(new VBox(14, button("Back to Browse", "btn-outline", this::showBrowse), createDetails(saved)));
+                showContent(new VBox(14, button("Back", "btn-outline", detailBack), createDetails(saved)));
                 new Alert(Alert.AlertType.INFORMATION, "Your listing report has been saved.").showAndWait();
             }, failure -> {
-                showContent(new VBox(14, button("Back to Browse", "btn-outline", this::showBrowse), createDetails(listing)));
+                showContent(new VBox(14, button("Back", "btn-outline", detailBack), createDetails(listing)));
                 new Alert(Alert.AlertType.ERROR, message(failure, "Unable to save your report. Please try again.")).showAndWait();
             });
         });

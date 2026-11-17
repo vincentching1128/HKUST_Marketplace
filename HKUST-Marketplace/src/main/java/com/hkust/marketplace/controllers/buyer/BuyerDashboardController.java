@@ -2,15 +2,22 @@ package com.hkust.marketplace.controllers.buyer;
 
 import com.hkust.marketplace.models.Notification;
 import com.hkust.marketplace.models.User;
+import com.hkust.marketplace.models.ChatThread;
+import com.hkust.marketplace.models.Deal;
+import com.hkust.marketplace.models.DealStatus;
+import com.hkust.marketplace.controllers.ChatInboxPane;
+import com.hkust.marketplace.controllers.ChatPane;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.BuyerListingService;
-import com.hkust.marketplace.utils.DummyDataService;
+import com.hkust.marketplace.services.BuyerDealService;
+import com.hkust.marketplace.services.ChatService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
@@ -19,6 +26,8 @@ import javafx.scene.layout.*;
 import java.time.format.DateTimeFormatter;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.Callable;
 
 public class BuyerDashboardController {
 
@@ -29,10 +38,16 @@ public class BuyerDashboardController {
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
     @FXML private Label welcomeLabel;
-    @FXML private Button btnBrowse, btnDeals, btnHistory, btnFavourites, btnNotifications, btnProfile;
+    @FXML private Button btnBrowse, btnDeals, btnChats, btnHistory, btnFavourites, btnNotifications, btnProfile;
 
     private Button currentActiveBtn;
     private BuyerListingsPane listingsPane;
+    private BuyerDealsPane dealsPane;
+    private ChatInboxPane chatInbox;
+    private ChatPane chatPane;
+    private final BuyerDealService buyerDeals = new BuyerDealService();
+    private final ChatService chatService = new ChatService();
+    private long navigationRequest;
 
     @FXML
     public void initialize() {
@@ -45,6 +60,10 @@ public class BuyerDashboardController {
     }
 
     private void setActive(Button btn, String title) {
+        navigationRequest++;
+        if (dealsPane != null) dealsPane.deactivate();
+        if (chatInbox != null) chatInbox.deactivate();
+        if (chatPane != null) chatPane.deactivate();
         if (currentActiveBtn != null) {
             currentActiveBtn.getStyleClass().remove("sidebar-btn-active");
         }
@@ -58,7 +77,8 @@ public class BuyerDashboardController {
         setActive(btnBrowse, "Browse Marketplace");
         if (listingsPane == null) {
             listingsPane = new BuyerListingsPane(new BuyerListingService(),
-                    SessionManager::getCurrentUser, pageTitle::setText);
+                    buyerDeals, chatService, SessionManager::getCurrentUser,
+                    pageTitle::setText, this::openChatForListing);
         }
         contentPane.getChildren().setAll(listingsPane);
         listingsPane.showBrowse();
@@ -67,43 +87,89 @@ public class BuyerDashboardController {
     @FXML
     private void showMyDeals() {
         setActive(btnDeals, "My Deals");
-        contentPane.getChildren().clear();
+        dealsPane = new BuyerDealsPane(buyerDeals, SessionManager::getCurrentUser,
+                this::showDealListing, this::openChatForDeal);
+        contentPane.getChildren().setAll(dealsPane);
+        dealsPane.refresh();
+    }
 
-        VBox root = new VBox(16);
-        root.setPadding(new Insets(4));
+    private void showDealListing(String listingId) {
+        setActive(btnBrowse, "Listing Details");
+        if (listingsPane == null) {
+            listingsPane = new BuyerListingsPane(new BuyerListingService(), buyerDeals, chatService,
+                    SessionManager::getCurrentUser, pageTitle::setText, this::openChatForListing);
+        }
+        contentPane.getChildren().setAll(listingsPane);
+        listingsPane.showListingDetails(listingId, this::showMyDeals);
+    }
 
-        Label info = new Label("Active offers, borrow requests and claims");
-        info.setStyle("-fx-text-fill: #5a5a7a;");
-        root.getChildren().add(info);
+    @FXML
+    private void showChats() {
+        setActive(btnChats, "Chats");
+        chatInbox = new ChatInboxPane(chatService, SessionManager::getCurrentUser,
+                thread -> showChatThread(thread.id(), thread.listingId()));
+        contentPane.getChildren().setAll(chatInbox);
+        chatInbox.refresh();
+    }
 
-        TableView<String[]> table = new TableView<>();
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+    private void showChatThread(String threadId, String listingId) {
+        setActive(btnChats, "Private Chat");
+        chatPane = new ChatPane(chatService, SessionManager::getCurrentUser, threadId,
+                this::showChats, listingId == null ? null : () -> showDealListing(listingId));
+        contentPane.getChildren().setAll(chatPane);
+        chatPane.refresh();
+    }
 
-        TableColumn<String[], String> colTitle = new TableColumn<>("Item");
-        colTitle.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[0]));
-        TableColumn<String[], String> colSeller = new TableColumn<>("Seller");
-        colSeller.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[1]));
-        TableColumn<String[], String> colType = new TableColumn<>("Type");
-        colType.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[2]));
-        TableColumn<String[], String> colStatus = new TableColumn<>("Status");
-        colStatus.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[3]));
-        TableColumn<String[], String> colAction = new TableColumn<>("Action");
-        colAction.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[4]));
+    private void openChatForListing(String listingId) {
+        openChat(() -> chatService.openForListing(SessionManager.getCurrentUser(), listingId), listingId);
+    }
 
-        table.getColumns().addAll(colTitle, colSeller, colType, colStatus, colAction);
+    private void openChatForDeal(String dealId) {
+        openChat(() -> {
+            User buyer = SessionManager.getCurrentUser();
+            ChatThread thread = chatService.openForDeal(buyer, dealId);
+            Deal deal = buyerDeals.getMyDeal(buyer, dealId);
+            if (deal.getStatus() == DealStatus.PENDING) {
+                try { chatService.sendProposal(buyer, thread.id(), dealId); }
+                catch (SQLException | IllegalArgumentException failure) {
+                    System.err.println("Formal proposal could not be shared in chat: " + failure.getMessage());
+                }
+            }
+            return thread;
+        }, null);
+    }
 
-        // Dummy rows
-        table.setItems(FXCollections.observableArrayList(
-                new String[]{"Calculus Textbook (Stewart)", "Charlie Lee", "Buy", "Accepted", "Chat / Complete"},
-                new String[]{"Graphing Calculator TI-84", "Diana Ng", "Borrow", "Pending", "View"}
-        ));
+    private void openChat(Callable<ChatThread> query, String fallbackListingId) {
+        setActive(btnChats, "Private Chat");
+        long token = navigationRequest;
+        User actor = SessionManager.getCurrentUser();
+        contentPane.getChildren().setAll(new VBox(12, new Label("Opening conversation..."), new ProgressIndicator()));
+        Task<ChatThread> task = new Task<>() {
+            @Override protected ChatThread call() throws Exception { return query.call(); }
+        };
+        task.setOnSucceeded(event -> {
+            if (currentNavigation(token, actor))
+                showChatThread(task.getValue().id(), task.getValue().listingId() == null
+                        ? fallbackListingId : task.getValue().listingId());
+        });
+        task.setOnFailed(event -> {
+            if (!currentNavigation(token, actor)) return;
+            Label error = new Label(task.getException() instanceof IllegalArgumentException
+                    ? task.getException().getMessage() : "Unable to open this conversation.");
+            error.setWrapText(true);
+            Button back = new Button("Back to Chats");
+            back.setOnAction(click -> showChats());
+            contentPane.getChildren().setAll(new VBox(12, error, back));
+        });
+        Thread worker = new Thread(task, "buyer-open-chat");
+        worker.setDaemon(true);
+        worker.start();
+    }
 
-        root.getChildren().add(table);
-        Label note = new Label("💡 Self-return for borrowed items and mark-complete are available here in the full version.");
-        note.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 12px;");
-        root.getChildren().add(note);
-
-        contentPane.getChildren().add(root);
+    private boolean currentNavigation(long token, User actor) {
+        User current = SessionManager.getCurrentUser();
+        return token == navigationRequest && actor != null && current != null
+                && Objects.equals(actor.getUsername(), current.getUsername());
     }
 
     @FXML
@@ -167,39 +233,78 @@ public class BuyerDashboardController {
     @FXML
     private void showNotifications() {
         setActive(btnNotifications, "Notification Board");
-        contentPane.getChildren().clear();
+        loadNotifications();
+    }
 
-        VBox root = new VBox(12);
-        root.setPadding(new Insets(4));
-
-        User user = SessionManager.getCurrentUser();
-        List<Notification> notifs = DummyDataService.getInstance()
-                .getNotificationsFor(user != null ? user.getUsername() : "");
-
-        if (notifs.isEmpty()) {
-            Label empty = new Label("No notifications yet.");
-            empty.setStyle("-fx-text-fill: #5a5a7a;");
-            root.getChildren().add(empty);
-        } else {
-            for (Notification n : notifs) {
-                VBox item = new VBox(4);
+    private void loadNotifications() {
+        long token = navigationRequest;
+        User actor = SessionManager.getCurrentUser();
+        contentPane.getChildren().setAll(new VBox(12, new Label("Loading notifications..."), new ProgressIndicator()));
+        Task<List<Notification>> task = new Task<>() {
+            @Override protected List<Notification> call() throws SQLException {
+                return notificationRepository.findByRecipient(actor.getUsername(), true);
+            }
+        };
+        task.setOnSucceeded(event -> {
+            if (!currentNavigation(token, actor)) return;
+            VBox root = new VBox(12);
+            root.setPadding(new Insets(4));
+            Button refresh = new Button("Refresh");
+            refresh.setOnAction(click -> loadNotifications());
+            root.getChildren().add(refresh);
+            if (task.getValue().isEmpty()) root.getChildren().add(new Label("No notifications yet."));
+            for (Notification notification : task.getValue()) {
+                VBox item = new VBox(5);
                 item.getStyleClass().add("notif-item");
-                Label title = new Label(n.getTitle());
-                title.setStyle("-fx-font-weight: bold; -fx-text-fill: #1a1a2e;");
-                Label msg = new Label(n.getMessage());
-                msg.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 13px;");
-                msg.setWrapText(true);
-                Label meta = new Label(n.getCategory() + " · " +
-                        n.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm")));
+                Label title = new Label(notification.getTitle());
+                title.setStyle("-fx-font-weight: bold;");
+                Label message = new Label(notification.getMessage());
+                message.setWrapText(true);
+                Label meta = new Label(notification.getCategory() + "  |  "
+                        + notification.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm"))
+                        + (notification.isRead() ? "  |  Read" : "  |  New"));
                 meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
-                item.getChildren().addAll(title, msg, meta);
+                item.getChildren().addAll(title, message, meta);
+                if (!notification.isRead()) {
+                    Button read = new Button("Mark Read");
+                    read.setOnAction(click -> markNotificationRead(notification, read));
+                    item.getChildren().add(read);
+                }
                 root.getChildren().add(item);
             }
-        }
+            ScrollPane scroll = new ScrollPane(root);
+            scroll.setFitToWidth(true);
+            contentPane.getChildren().setAll(scroll);
+        });
+        task.setOnFailed(event -> {
+            if (!currentNavigation(token, actor)) return;
+            Button retry = new Button("Retry");
+            retry.setOnAction(click -> loadNotifications());
+            contentPane.getChildren().setAll(new VBox(12, new Label("Unable to load notifications."), retry));
+        });
+        Thread worker = new Thread(task, "buyer-notification-load");
+        worker.setDaemon(true);
+        worker.start();
+    }
 
-        ScrollPane scroll = new ScrollPane(root);
-        scroll.setFitToWidth(true);
-        contentPane.getChildren().add(scroll);
+    private void markNotificationRead(Notification notification, Button button) {
+        User actor = SessionManager.getCurrentUser();
+        long token = navigationRequest;
+        button.setDisable(true);
+        Task<Boolean> task = new Task<>() {
+            @Override protected Boolean call() throws SQLException {
+                return notificationRepository.markAsRead(notification.getId(), actor.getUsername());
+            }
+        };
+        task.setOnSucceeded(event -> { if (currentNavigation(token, actor)) loadNotifications(); });
+        task.setOnFailed(event -> {
+            if (!currentNavigation(token, actor)) return;
+            button.setDisable(false);
+            new Alert(Alert.AlertType.ERROR, "Unable to mark this notification as read.").showAndWait();
+        });
+        Thread worker = new Thread(task, "buyer-notification-read");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     @FXML

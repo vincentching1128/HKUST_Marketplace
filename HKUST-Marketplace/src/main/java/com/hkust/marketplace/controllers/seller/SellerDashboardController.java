@@ -107,7 +107,17 @@ public class SellerDashboardController {
         User seller = SessionManager.getCurrentUser();
         contentPane.getChildren().setAll(new VBox(12,new Label("Opening conversation..."),new ProgressIndicator()));
         Task<ChatThread> open = new Task<>() {
-            @Override protected ChatThread call() throws SQLException { return chatService.openForDeal(seller,dealId); }
+            @Override protected ChatThread call() throws SQLException {
+                ChatThread thread = chatService.openForDeal(seller, dealId);
+                Deal deal = new DealService().getSellerDeal(seller, dealId);
+                if (deal.getStatus() == DealStatus.COUNTERED) {
+                    try { chatService.sendProposal(seller, thread.id(), dealId); }
+                    catch (SQLException | IllegalArgumentException failure) {
+                        System.err.println("Counteroffer chat message could not be shared: " + failure.getMessage());
+                    }
+                }
+                return thread;
+            }
         };
         open.setOnSucceeded(event -> { if (currentChatRequest(request,seller)) showChatThread(open.getValue().id()); });
         open.setOnFailed(event -> {
