@@ -30,6 +30,7 @@ public class SellerOffersPane extends VBox {
     private final DealService service;
     private final Supplier<User> currentUser;
     private final Consumer<String> openListing;
+    private final Consumer<String> openChat;
     private final Button refresh = button("Refresh", "btn-outline");
     private final VBox items = new VBox(14);
     private final Label feedback = new Label();
@@ -38,10 +39,15 @@ public class SellerOffersPane extends VBox {
     private long request;
 
     public SellerOffersPane(DealService service, Supplier<User> currentUser, Consumer<String> openListing) {
+        this(service,currentUser,openListing,null);
+    }
+
+    public SellerOffersPane(DealService service, Supplier<User> currentUser, Consumer<String> openListing, Consumer<String> openChat) {
         super(12);
         this.service = Objects.requireNonNull(service);
         this.currentUser = Objects.requireNonNull(currentUser);
         this.openListing = Objects.requireNonNull(openListing);
+        this.openChat = openChat;
         setPadding(new Insets(4));
         Label help = new Label("Review incoming sale offers, borrowing requests and giveaway claims. Counteroffers await the buyer's response.");
         help.setWrapText(true);
@@ -135,6 +141,11 @@ public class SellerOffersPane extends VBox {
             }
         });
         FlowPane actions = new FlowPane(10, 10, view, accept, decline);
+        if (openChat != null) {
+            Button chat = button("Open Chat", "btn-outline");
+            chat.setOnAction(event -> openChat.accept(deal.getId()));
+            actions.getChildren().add(chat);
+        }
         if (deal.getDealType() != ListingType.GIVEAWAY) {
             Button counter = button(deal.getStatus() == DealStatus.COUNTERED ? "Revise Counter" : "Counter", "btn-outline");
             counter.setOnAction(event -> counterDialog(deal).showAndWait().ifPresent(terms ->

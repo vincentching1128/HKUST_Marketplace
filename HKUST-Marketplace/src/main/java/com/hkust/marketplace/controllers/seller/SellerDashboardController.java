@@ -7,6 +7,9 @@ import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.services.SellerNotificationService;
 import com.hkust.marketplace.services.DealService;
+import com.hkust.marketplace.services.ChatService;
+import com.hkust.marketplace.controllers.ChatInboxPane;
+import com.hkust.marketplace.controllers.ChatPane;
 import javafx.concurrent.Task;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
@@ -44,12 +47,16 @@ public class SellerDashboardController {
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
     @FXML private Label welcomeLabel;
-    @FXML private Button btnListings, btnCreate, btnOffers, btnStats, btnReviews, btnNotifications, btnProfile;
+    @FXML private Button btnListings, btnCreate, btnOffers, btnChats, btnStats, btnReviews, btnNotifications, btnProfile;
 
     private Button currentActiveBtn;
     private boolean includeReadNotifications;
     private long notificationRequest;
     private SellerOffersPane offersPane;
+    private final ChatService chatService = new ChatService();
+    private ChatInboxPane chatInbox;
+    private ChatPane chatPane;
+    private long chatRequest;
 
     @FXML
     public void initialize() {
@@ -61,6 +68,9 @@ public class SellerDashboardController {
 
     private void setActive(Button btn, String title) {
         if (offersPane != null) offersPane.deactivate();
+        if (chatInbox != null) chatInbox.deactivate();
+        if (chatPane != null) chatPane.deactivate();
+        chatRequest++;
         notificationRequest++;
         if (currentActiveBtn != null) currentActiveBtn.getStyleClass().remove("sidebar-btn-active");
         btn.getStyleClass().add("sidebar-btn-active");
@@ -71,9 +81,51 @@ public class SellerDashboardController {
     @FXML
     private void showIncomingOffers() {
         setActive(btnOffers, "Incoming Offers");
-        offersPane = new SellerOffersPane(new DealService(), SessionManager::getCurrentUser, this::showListingDetails);
+        offersPane = new SellerOffersPane(new DealService(), SessionManager::getCurrentUser, this::showListingDetails, this::openChatForDeal);
         contentPane.getChildren().setAll(offersPane);
         offersPane.refresh();
+    }
+
+    @FXML
+    private void showChats() {
+        setActive(btnChats,"Chats");
+        chatInbox = new ChatInboxPane(chatService,SessionManager::getCurrentUser,thread -> showChatThread(thread.id()));
+        contentPane.getChildren().setAll(chatInbox);
+        chatInbox.refresh();
+    }
+
+    private void showChatThread(String threadId) {
+        setActive(btnChats,"Private Chat");
+        chatPane = new ChatPane(chatService,SessionManager::getCurrentUser,threadId,this::showChats);
+        contentPane.getChildren().setAll(chatPane);
+        chatPane.refresh();
+    }
+
+    private void openChatForDeal(String dealId) {
+        setActive(btnChats,"Private Chat");
+        long request = chatRequest;
+        User seller = SessionManager.getCurrentUser();
+        contentPane.getChildren().setAll(new VBox(12,new Label("Opening conversation..."),new ProgressIndicator()));
+        Task<ChatThread> open = new Task<>() {
+            @Override protected ChatThread call() throws SQLException { return chatService.openForDeal(seller,dealId); }
+        };
+        open.setOnSucceeded(event -> { if (currentChatRequest(request,seller)) showChatThread(open.getValue().id()); });
+        open.setOnFailed(event -> {
+            if (!currentChatRequest(request,seller)) return;
+            Label error = new Label(open.getException() instanceof IllegalArgumentException ? open.getException().getMessage()
+                    : "Unable to open this conversation. Please try again.");
+            error.setWrapText(true);
+            Button retry = new Button("Retry");retry.setOnAction(e -> openChatForDeal(dealId));
+            Button back = new Button("Back to Chats");back.setOnAction(e -> showChats());
+            contentPane.getChildren().setAll(new VBox(12,error,retry,back));
+        });
+        Thread thread = new Thread(open,"seller-open-chat");thread.setDaemon(true);thread.start();
+    }
+
+    private boolean currentChatRequest(long request,User seller) {
+        User current=SessionManager.getCurrentUser();
+        return request==chatRequest&&currentActiveBtn==btnChats&&seller!=null&&current!=null
+                &&java.util.Objects.equals(seller.getUsername(),current.getUsername());
     }
 
     @FXML
