@@ -42,6 +42,21 @@ public class NotificationRepository {
      * @throws SQLException when the insert fails (including a missing user foreign key)
      */
     public void create(Notification notification) throws SQLException {
+        NotificationValues values = prepare(notification);
+        try (Connection connection = DatabaseManager.getConnection()) {
+            insert(connection, notification, values);
+        }
+    }
+
+    /** Persist using the caller's connection; never commit, roll back, or close it. */
+    public void create(Connection connection, Notification notification) throws SQLException {
+        if (connection == null) throw new IllegalArgumentException("A connection is required.");
+        insert(connection, notification, prepare(notification));
+    }
+
+    private record NotificationValues(String username, String category, String title, String message) {}
+
+    private NotificationValues prepare(Notification notification) {
         if (notification == null) {
             throw new IllegalArgumentException("A notification is required.");
         }
@@ -57,18 +72,21 @@ public class NotificationRepository {
             notification.setTimestamp(LocalDateTime.now());
         }
 
+        return new NotificationValues(username, category, title, message);
+    }
+
+    private void insert(Connection conn, Notification notification, NotificationValues values) throws SQLException {
         String sql = """
                 INSERT INTO notifications
                     (id, username, category, title, message, timestamp, isRead)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """;
-        try (Connection conn = DatabaseManager.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, notification.getId());
-            stmt.setString(2, username);
-            stmt.setString(3, category);
-            stmt.setString(4, title);
-            stmt.setString(5, message);
+            stmt.setString(2, values.username());
+            stmt.setString(3, values.category());
+            stmt.setString(4, values.title());
+            stmt.setString(5, values.message());
             stmt.setTimestamp(6, Timestamp.valueOf(notification.getTimestamp()));
             stmt.setBoolean(7, notification.isRead());
             if (stmt.executeUpdate() != 1) {
