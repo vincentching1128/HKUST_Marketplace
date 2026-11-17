@@ -19,6 +19,21 @@ import java.util.List;
 
 public class ListingRepository {
 
+    /** Reserve a LIVE listing as part of the same transaction that accepts its deal. */
+    public boolean reserveForDeal(Connection connection, String listingId, String sellerUsername) throws SQLException {
+        if (connection == null || connection.getAutoCommit()) {
+            throw new IllegalArgumentException("Reserving a listing requires a transaction.");
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE listings SET listingStatus = 'RESERVED', row_version = row_version + 1
+                WHERE id = ? AND seller_username = ? AND listingStatus = 'LIVE'
+                """)) {
+            statement.setString(1, listingId);
+            statement.setString(2, sellerUsername);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
     /**
      * Save a new listing and its 0-6 images together.
      * The service supplies the ID, seller, validated fields, and Pending Review status.

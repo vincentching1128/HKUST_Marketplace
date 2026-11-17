@@ -15,6 +15,20 @@ import java.util.List;
 
 public class UserRepository {
 
+    /** Re-read and hold an account stable for a caller-owned business transaction. */
+    public User findByUsername(Connection connection, String username) throws SQLException {
+        if (connection == null || connection.getAutoCommit()) {
+            throw new IllegalArgumentException("An account lock requires a transaction.");
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT * FROM users WHERE username = ? FOR SHARE")) {
+            statement.setString(1, username);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? mapRow(rows) : null;
+            }
+        }
+    }
+
     public User findByUsername(String target) throws SQLException {
         String sql = "SELECT * FROM users WHERE username = ?"; //query
         try (Connection conn = DatabaseManager.getConnection();
