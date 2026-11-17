@@ -5,6 +5,9 @@ import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.ListingService;
+import com.hkust.marketplace.services.SellerNotificationService;
+import com.hkust.marketplace.services.DealService;
+import javafx.concurrent.Task;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -37,12 +40,16 @@ public class SellerDashboardController {
     private final UserRepository userRepository = new UserRepository();
     private final ListingService listingService = new ListingService();
     private final NotificationRepository notificationRepository = new NotificationRepository();
+    private final SellerNotificationService sellerNotifications = new SellerNotificationService(userRepository, notificationRepository);
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
     @FXML private Label welcomeLabel;
-    @FXML private Button btnListings, btnCreate, btnStats, btnReviews, btnNotifications, btnProfile;
+    @FXML private Button btnListings, btnCreate, btnOffers, btnStats, btnReviews, btnNotifications, btnProfile;
 
     private Button currentActiveBtn;
+    private boolean includeReadNotifications;
+    private long notificationRequest;
+    private SellerOffersPane offersPane;
 
     @FXML
     public void initialize() {
@@ -53,10 +60,20 @@ public class SellerDashboardController {
     }
 
     private void setActive(Button btn, String title) {
+        if (offersPane != null) offersPane.deactivate();
+        notificationRequest++;
         if (currentActiveBtn != null) currentActiveBtn.getStyleClass().remove("sidebar-btn-active");
         btn.getStyleClass().add("sidebar-btn-active");
         currentActiveBtn = btn;
         pageTitle.setText(title);
+    }
+
+    @FXML
+    private void showIncomingOffers() {
+        setActive(btnOffers, "Incoming Offers");
+        offersPane = new SellerOffersPane(new DealService(), SessionManager::getCurrentUser, this::showListingDetails);
+        contentPane.getChildren().setAll(offersPane);
+        offersPane.refresh();
     }
 
     @FXML
@@ -66,6 +83,10 @@ public class SellerDashboardController {
 
         VBox root = new VBox(14);
         root.setPadding(new Insets(4));
+        Button refresh = new Button("Refresh");
+        refresh.getStyleClass().add("btn-outline");
+        refresh.setOnAction(event -> showMyListings());
+        root.getChildren().add(refresh);
 
         //the service checks the account and SQL only returns this seller's listings
         try {
@@ -144,12 +165,17 @@ public class SellerDashboardController {
         Button delBtn = new Button("Delete");
         delBtn.getStyleClass().addAll("btn-danger", "btn-sm");
         delBtn.setOnAction(event -> {
-            Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
-                    "Delete '" + l.getTitle() + "' and its photos? This cannot be undone.", ButtonType.OK, ButtonType.CANCEL);
-            if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
             try {
-                listingService.deleteListing(SessionManager.getCurrentUser(), l.getId());
-                new Alert(Alert.AlertType.INFORMATION, "Listing deleted.").showAndWait();
+                ListingService.ListingChangePreview preview = listingService.previewListingChange(SessionManager.getCurrentUser(), l.getId());
+                if (preview.listingVersion() != l.getRowVersion()) {
+                    throw new IllegalArgumentException("This listing changed. Refresh My Listings before deleting it.");
+                }
+                Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                        "Delete '" + l.getTitle() + "'? It will no longer be available in the marketplace."
+                                + affectedProposalWarning(preview), ButtonType.OK, ButtonType.CANCEL);
+                if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
+                listingService.deleteListing(SessionManager.getCurrentUser(), l.getId(), preview);
+                new Alert(Alert.AlertType.INFORMATION, "Listing removed.").showAndWait();
                 showMyListings();
             } catch (IllegalArgumentException unavailable) {
                 new Alert(Alert.AlertType.WARNING, unavailable.getMessage()).showAndWait();
@@ -523,16 +549,29 @@ public class SellerDashboardController {
                 }
                 default -> listing.setType(ListingType.GIVEAWAY);
             }
+            ListingService.ListingChangePreview confirmedChange = null;
             if (editing) {
-                Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
-                        "Save changes to '" + existing.getTitle() + "'? The listing will return to Pending Review.",
-                        ButtonType.OK, ButtonType.CANCEL);
-                if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
+                try {
+                    confirmedChange = listingService.previewListingChange(user, existing.getId());
+                    if (confirmedChange.listingVersion() != existing.getRowVersion()) {
+                        throw new IllegalArgumentException("This listing changed while you were editing. Reopen it to review the latest details.");
+                    }
+                    Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                            "Save changes to '" + existing.getTitle() + "'? The listing will return to Pending Review."
+                                    + affectedProposalWarning(confirmedChange), ButtonType.OK, ButtonType.CANCEL);
+                    if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
+                } catch (IllegalArgumentException unavailable) {
+                    new Alert(Alert.AlertType.WARNING, unavailable.getMessage()).showAndWait();
+                    return;
+                } catch (SQLException failure) {
+                    new Alert(Alert.AlertType.ERROR, "Unable to check affected proposals. Please try again.").showAndWait();
+                    return;
+                }
             }
             //keep submission disabled while the service validates and saves the listing
             submitBtn.setDisable(true);
             try {
-                if (editing) listingService.updateListing(user, existing.getId(), listing);
+                if (editing) listingService.updateListing(user, existing.getId(), listing, confirmedChange);
                 else listingService.createListing(user, listing);
             } catch (IllegalArgumentException invalid) {
                 //show the validation message and keep the form values so the seller can fix them
@@ -574,6 +613,12 @@ public class SellerDashboardController {
         ScrollPane scroll = new ScrollPane(form);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
+    }
+
+    private String affectedProposalWarning(ListingService.ListingChangePreview preview) {
+        int count = preview.affectedVersions().size();
+        return count == 0 ? "" : "\n\nThis will cancel " + count
+                + " pending or countered proposal(s) and notify the affected buyers.";
     }
 
     //rebuild the thumbnails after adding or removing photos, keeping their saved order
@@ -707,31 +752,88 @@ public class SellerDashboardController {
     @FXML
     private void showNotifications() {
         setActive(btnNotifications, "Notifications");
-        contentPane.getChildren().clear();
+        User seller = SessionManager.getCurrentUser();
+        if (seller == null) { SceneManager.showSellerLogin(); return; }
+        long request = ++notificationRequest;
+        boolean includeRead = includeReadNotifications;
         VBox root = new VBox(12);
         root.setPadding(new Insets(4));
-        User user = SessionManager.getCurrentUser();
-        List<Notification> notifs = DummyDataService.getInstance()
-                .getNotificationsFor(user != null ? user.getUsername() : "");
-        if (notifs.isEmpty()) {
-            root.getChildren().add(new Label("No notifications."));
-        } else {
-            for (Notification n : notifs) {
-                VBox item = new VBox(4);
-                item.getStyleClass().add("notif-item");
-                Label t = new Label(n.getTitle());
-                t.setStyle("-fx-font-weight: bold;");
-                Label m = new Label(n.getMessage());
-                m.setWrapText(true);
-                m.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 13px;");
-                Label meta = new Label(n.getCategory() + " · " +
-                        n.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM HH:mm")));
-                meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
-                item.getChildren().addAll(t, m, meta);
-                root.getChildren().add(item);
+        CheckBox history = new CheckBox("Show read notifications");
+        history.setSelected(includeRead);
+        history.setOnAction(event -> { includeReadNotifications = history.isSelected(); showNotifications(); });
+        Button refresh = new Button("Refresh");
+        refresh.getStyleClass().add("btn-outline");
+        refresh.setOnAction(event -> showNotifications());
+        root.getChildren().add(new HBox(12, refresh, history));
+        VBox inbox = new VBox(12, new Label("Loading notifications..."), new ProgressIndicator());
+        root.getChildren().add(inbox);
+        ScrollPane scroll = new ScrollPane(root);
+        scroll.setFitToWidth(true);
+        contentPane.getChildren().setAll(scroll);
+        Task<List<Notification>> load = new Task<>() {
+            @Override protected List<Notification> call() throws SQLException {
+                return sellerNotifications.getNotifications(seller, includeRead);
             }
-        }
-        contentPane.getChildren().add(new ScrollPane(root));
+        };
+        load.setOnSucceeded(event -> {
+            if (!currentNotificationRequest(request, seller)) return;
+            inbox.getChildren().clear();
+            if (load.getValue().isEmpty()) inbox.getChildren().add(new Label(includeRead ? "No notifications." : "No unread notifications."));
+            for (Notification notification : load.getValue()) inbox.getChildren().add(notificationCard(notification, seller));
+        });
+        load.setOnFailed(event -> {
+            if (!currentNotificationRequest(request, seller)) return;
+            String message = load.getException() instanceof IllegalArgumentException
+                    ? load.getException().getMessage() : "Unable to load notifications. Use Refresh to try again.";
+            Label error = new Label(message);
+            error.setWrapText(true);
+            error.setStyle("-fx-text-fill: #c62828;");
+            inbox.getChildren().setAll(error);
+        });
+        Thread thread = new Thread(load, "seller-notification-load");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private boolean currentNotificationRequest(long request, User seller) {
+        User current = SessionManager.getCurrentUser();
+        return request == notificationRequest && currentActiveBtn == btnNotifications
+                && current != null && java.util.Objects.equals(current.getUsername(), seller.getUsername());
+    }
+
+    private VBox notificationCard(Notification notification, User seller) {
+        Label title = new Label(notification.getTitle());
+        title.setWrapText(true);
+        title.setStyle("-fx-font-weight: " + (notification.isRead() ? "normal" : "bold") + ";");
+        Label message = new Label(notification.getMessage());
+        message.setWrapText(true);
+        Label meta = new Label(notification.getCategory() + " · " + (notification.getTimestamp() == null
+                ? "Unknown time" : notification.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm"))));
+        meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
+        Button read = new Button(notification.isRead() ? "Read" : "Mark as read");
+        read.getStyleClass().addAll("btn-outline", "btn-sm");
+        read.setDisable(notification.isRead());
+        read.setOnAction(event -> {
+            long request = notificationRequest;
+            read.setDisable(true);
+            Task<Boolean> save = new Task<>() {
+                @Override protected Boolean call() throws SQLException {
+                    return sellerNotifications.markAsRead(seller, notification.getId());
+                }
+            };
+            save.setOnSucceeded(done -> { if (currentNotificationRequest(request, seller)) showNotifications(); });
+            save.setOnFailed(done -> {
+                if (!currentNotificationRequest(request, seller)) return;
+                read.setDisable(false);
+                new Alert(Alert.AlertType.ERROR, "Unable to mark this notification as read. Please try again.").showAndWait();
+            });
+            Thread thread = new Thread(save, "seller-notification-read");
+            thread.setDaemon(true);
+            thread.start();
+        });
+        VBox item = new VBox(6, title, message, new HBox(12, meta, read));
+        item.getStyleClass().add("notif-item");
+        return item;
     }
 
     @FXML
