@@ -96,6 +96,11 @@ public class NotificationRepository {
     }
     /** Newest-first inbox for one recipient (uses idx_notifications_recipient). */
     public List<Notification> findByRecipient(String username) throws SQLException {
+        return findByRecipient(username, false);
+    }
+
+    /** Optionally include read history without changing existing unread-only callers. */
+    public List<Notification> findByRecipient(String username, boolean includeRead) throws SQLException {
         if (username == null || username.isBlank()) {
             throw new IllegalArgumentException("A recipient username is required.");
         }
@@ -103,9 +108,7 @@ public class NotificationRepository {
                 SELECT id, username, category, title, message, timestamp, isRead
                 FROM notifications
                 WHERE username = ?
-                    AND isRead <> TRUE
-                ORDER BY timestamp DESC, id ASC
-                """;
+                """ + (includeRead ? "" : " AND isRead = FALSE") + " ORDER BY timestamp DESC, id ASC";
         List<Notification> notifications = new ArrayList<>();
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -133,6 +136,20 @@ public class NotificationRepository {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, notificationId);
             return stmt.executeUpdate() > 0;
+        }
+    }
+
+    /** Scope a portal action to its authenticated recipient. */
+    public boolean markAsRead(String notificationId, String username) throws SQLException {
+        if (notificationId == null || notificationId.isBlank() || username == null || username.isBlank()) {
+            throw new IllegalArgumentException("A notification ID and recipient are required.");
+        }
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "UPDATE notifications SET isRead = TRUE WHERE id = ? AND username = ? AND isRead = FALSE")) {
+            stmt.setString(1, notificationId);
+            stmt.setString(2, username);
+            return stmt.executeUpdate() == 1;
         }
     }
 

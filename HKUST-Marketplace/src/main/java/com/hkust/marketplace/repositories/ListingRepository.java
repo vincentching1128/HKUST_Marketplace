@@ -251,6 +251,21 @@ public class ListingRepository {
         }
     }
 
+    /** Lock an owned row for a caller-owned seller change transaction. */
+    public Listing findByIdAndSellerForUpdate(Connection conn, String id, String seller) throws SQLException {
+        if (conn == null || conn.getAutoCommit()) throw new IllegalArgumentException("A transaction is required.");
+        String sql = "SELECT l.*, u.full_name AS seller_full_name FROM listings l "
+                + "JOIN users u ON u.username = l.seller_username "
+                + "WHERE l.id = ? AND l.seller_username = ? AND l.listingStatus <> 'REMOVED' FOR UPDATE";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, id);
+            stmt.setString(2, seller);
+            try (ResultSet rows = stmt.executeQuery()) {
+                return rows.next() ? mapRow(rows) : null;
+            }
+        }
+    }
+
     /**
      * Records an admin review decision. Only listingStatus, reviewed_at and
      * rejection_reason are written; every other column (content, seller, photos) is untouched.
@@ -351,6 +366,21 @@ public class ListingRepository {
     }
 
     public void updateOwned(String id, String seller, Listing listing) throws SQLException {
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                updateOwned(conn, id, seller, listing);
+                conn.commit();
+            } catch (SQLException | RuntimeException failure) {
+                try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+                throw failure;
+            }
+        }
+    }
+
+    /** Content and photo replacement without committing the caller's transaction. */
+    public void updateOwned(Connection conn, String id, String seller, Listing listing) throws SQLException {
+        if (conn == null || conn.getAutoCommit()) throw new IllegalArgumentException("A transaction is required.");
         String sql = """
                 UPDATE listings SET itemName = ?, category = ?, listingType = ?, price = ?,
                     description = ?, item_condition = ?, lending_duration = ?, lending_unit = ?,
@@ -358,38 +388,29 @@ public class ListingRepository {
                     rejection_reason = NULL, row_version = row_version + 1
                 WHERE id = ? AND seller_username = ?
                 """;
-        try (Connection conn = DatabaseManager.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                lockChangeableListing(conn, id, seller);
-                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                    stmt.setString(1, listing.getTitle());
-                    stmt.setString(2, listing.getCategory());
-                    stmt.setString(3, listing.getType().name());
-                    if (listing.getPrice() == null) stmt.setNull(4, Types.DECIMAL);
-                    else stmt.setBigDecimal(4, BigDecimal.valueOf(listing.getPrice()));
-                    stmt.setString(5, listing.getDescription());
-                    stmt.setString(6, listing.getCondition().toUpperCase(java.util.Locale.ROOT).replace(' ', '_'));
-                    if (listing.getLendingDuration() == null) stmt.setNull(7, Types.INTEGER);
-                    else stmt.setInt(7, listing.getLendingDuration());
-                    stmt.setString(8, listing.getLendingUnit() == null ? null : listing.getLendingUnit().name());
-                    stmt.setString(9, listing.getMeetupLocation());
-                    stmt.setString(10, id);
-                    stmt.setString(11, seller);
-                    if (stmt.executeUpdate() != 1) throw new SQLException("The listing could not be updated.");
-                }
-                //replace the photo set in the same transaction, including when all were removed
-                try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM listing_photos WHERE listing_id = ?")) {
-                    stmt.setString(1, id);
-                    stmt.executeUpdate();
-                }
-                insertPhotos(conn, id, listing.getPhotos() == null ? List.of() : listing.getPhotos());
-                conn.commit();
-            } catch (SQLException | RuntimeException failure) {
-                try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
-                throw failure;
-            }
+        lockChangeableListing(conn, id, seller);
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, listing.getTitle());
+            stmt.setString(2, listing.getCategory());
+            stmt.setString(3, listing.getType().name());
+            if (listing.getPrice() == null) stmt.setNull(4, Types.DECIMAL);
+            else stmt.setBigDecimal(4, BigDecimal.valueOf(listing.getPrice()));
+            stmt.setString(5, listing.getDescription());
+            stmt.setString(6, listing.getCondition().toUpperCase(java.util.Locale.ROOT).replace(' ', '_'));
+            if (listing.getLendingDuration() == null) stmt.setNull(7, Types.INTEGER);
+            else stmt.setInt(7, listing.getLendingDuration());
+            stmt.setString(8, listing.getLendingUnit() == null ? null : listing.getLendingUnit().name());
+            stmt.setString(9, listing.getMeetupLocation());
+            stmt.setString(10, id);
+            stmt.setString(11, seller);
+            if (stmt.executeUpdate() != 1) throw new SQLException("The listing could not be updated.");
         }
+        // Replace photos in the caller's transaction, including when all were removed.
+        try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM listing_photos WHERE listing_id = ?")) {
+            stmt.setString(1, id);
+            stmt.executeUpdate();
+        }
+        insertPhotos(conn, id, listing.getPhotos() == null ? List.of() : listing.getPhotos());
     }
 
     /**
@@ -447,18 +468,26 @@ public class ListingRepository {
         try (Connection conn = DatabaseManager.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                lockChangeableListing(conn, id, seller);
-                //the photo foreign key removes the matching photos when this row is deleted
-                try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM listings WHERE id = ? AND seller_username = ?")) {
-                    stmt.setString(1, id);
-                    stmt.setString(2, seller);
-                    if (stmt.executeUpdate() != 1) throw new SQLException("The listing could not be deleted.");
-                }
+                deleteOwned(conn, id, seller);
                 conn.commit();
             } catch (SQLException | RuntimeException failure) {
                 try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
                 throw failure;
             }
+        }
+    }
+
+    /** Remove from marketplace while retaining deal history and its referenced listing. */
+    public void deleteOwned(Connection conn, String id, String seller) throws SQLException {
+        if (conn == null || conn.getAutoCommit()) throw new IllegalArgumentException("A transaction is required.");
+        lockChangeableListing(conn, id, seller);
+        try (PreparedStatement stmt = conn.prepareStatement("""
+                UPDATE listings SET listingStatus = 'REMOVED', row_version = row_version + 1
+                WHERE id = ? AND seller_username = ?
+                """)) {
+            stmt.setString(1, id);
+            stmt.setString(2, seller);
+            if (stmt.executeUpdate() != 1) throw new SQLException("The listing could not be removed.");
         }
     }
 

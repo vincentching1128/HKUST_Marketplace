@@ -27,6 +27,10 @@
                     onAction="#showMyListings" maxWidth="Infinity" alignment="CENTER_LEFT"/>
             <Button fx:id="btnCreate" text="  Create Listing" styleClass="sidebar-btn"
                     onAction="#showCreateListing" maxWidth="Infinity" alignment="CENTER_LEFT"/>
+            <Button fx:id="btnOffers" text="  Incoming Offers" styleClass="sidebar-btn"
+                    onAction="#showIncomingOffers" maxWidth="Infinity" alignment="CENTER_LEFT"/>
+            <Button fx:id="btnChats" text="  Chats" styleClass="sidebar-btn"
+                    onAction="#showChats" maxWidth="Infinity" alignment="CENTER_LEFT"/>
             <Button fx:id="btnStats" text="  Seller Stats" styleClass="sidebar-btn"
                     onAction="#showStats" maxWidth="Infinity" alignment="CENTER_LEFT"/>
             <Button fx:id="btnReviews" text="  Reviews &amp; Feedback" styleClass="sidebar-btn"

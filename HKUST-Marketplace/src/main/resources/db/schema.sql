@@ -178,6 +178,52 @@ CREATE TABLE IF NOT EXISTS deals(
 
 );
 
+-- One private conversation per listing and buyer/seller pair. Nullable references
+-- preserve history on account/listing deletion without granting a reused username access.
+CREATE TABLE IF NOT EXISTS chat_threads (
+    id VARCHAR(50) PRIMARY KEY,
+    listing_id VARCHAR(50) NULL,
+    listing_title VARCHAR(255) NOT NULL,
+    listing_type ENUM('SELL','LEND','GIVEAWAY') NOT NULL,
+    buyer_username VARCHAR(50) NULL,
+    seller_username VARCHAR(50) NULL,
+    buyer_name VARCHAR(50) NOT NULL,
+    seller_name VARCHAR(50) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_chat_parties (listing_id, buyer_username, seller_username),
+    INDEX idx_chat_buyer (buyer_username, created_at),
+    INDEX idx_chat_seller (seller_username, created_at),
+    CONSTRAINT fk_chat_listing FOREIGN KEY (listing_id)
+        REFERENCES listings(id) ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_chat_buyer FOREIGN KEY (buyer_username)
+        REFERENCES users(username) ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_chat_seller FOREIGN KEY (seller_username)
+        REFERENCES users(username) ON UPDATE CASCADE ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    thread_id VARCHAR(50) NOT NULL,
+    sender_role ENUM('BUYER','SELLER') NOT NULL,
+    sender_name VARCHAR(50) NOT NULL,
+    message_type ENUM('TEXT','PROPOSAL','COUNTER') NOT NULL DEFAULT 'TEXT',
+    body TEXT NOT NULL,
+    proposal_id VARCHAR(50) NULL,
+    proposal_version BIGINT NULL,
+    proposal_type ENUM('SELL','LEND','GIVEAWAY') NULL,
+    proposal_price DECIMAL(10,2) NULL,
+    borrow_start DATETIME(6) NULL,
+    borrow_end DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    INDEX idx_chat_messages_thread (thread_id, id),
+    UNIQUE KEY uq_chat_proposal_version (proposal_id, proposal_version),
+    CONSTRAINT fk_chat_message_thread FOREIGN KEY (thread_id)
+        REFERENCES chat_threads(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_chat_message_proposal FOREIGN KEY (proposal_id)
+        REFERENCES deals(id) ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT chk_chat_message_body CHECK (CHAR_LENGTH(TRIM(body)) BETWEEN 1 AND 4000)
+);
+
 -- Buyer/seller identity validation belongs in the backend deal service.
 -- ============================================================
 -- Seed demo accounts (same credentials as the in-memory demo).

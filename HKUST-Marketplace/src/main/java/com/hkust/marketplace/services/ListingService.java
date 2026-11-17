@@ -4,21 +4,29 @@ import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.ListingRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
+import com.hkust.marketplace.repositories.DealRepository;
+import com.hkust.marketplace.utils.DatabaseManager;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import com.hkust.marketplace.utils.DummyDataService;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 public class ListingService {
     private final UserRepository userRepository;
     private final ListingRepository listingRepository;
     private final NotificationRepository notificationRepository;
+    private final DealRepository deals;
+    private final DealRepository.ConnectionProvider connections;
 
     public ListingService() {
         this(new UserRepository(), new ListingRepository(), new NotificationRepository());
@@ -31,9 +39,17 @@ public class ListingService {
 
     public ListingService(UserRepository userRepository, ListingRepository listingRepository,
                           NotificationRepository notificationRepository) {
+        this(userRepository, listingRepository, notificationRepository, new DealRepository(), DatabaseManager::getConnection);
+    }
+
+    public ListingService(UserRepository userRepository, ListingRepository listingRepository,
+                          NotificationRepository notificationRepository, DealRepository deals,
+                          DealRepository.ConnectionProvider connections) {
         this.userRepository = Objects.requireNonNull(userRepository);
         this.listingRepository = Objects.requireNonNull(listingRepository);
         this.notificationRepository = Objects.requireNonNull(notificationRepository);
+        this.deals = Objects.requireNonNull(deals);
+        this.connections = Objects.requireNonNull(connections);
     }
 
     //use the signed-in account, rather than accepting a seller name from the screen
@@ -151,21 +167,106 @@ public class ListingService {
     }
 
     public void updateListing(User user, String id, Listing changes) throws SQLException {
-        User current = requireActiveSeller(user);
-        validateListing(changes);
-        Listing existing = getListing(user, id);
-        checkCanChange(existing);
-        listingRepository.updateOwned(id, current.getUsername(), changes);
-        //an edit sends the listing back to Pending Review, so the admins must re-review it
-        notifyAdminsOfPendingListing(changes.getTitle(), current.getUsername(), current.getUsername(),
-                "Listing Resubmitted for Review");
+        ListingChangePreview preview = previewListingChange(user, id);
+        if (!preview.affectedVersions().isEmpty()) throw confirmationRequired();
+        updateListing(user, id, changes, preview);
     }
 
     public void deleteListing(User user, String id) throws SQLException {
-        User current = requireActiveSeller(user);
-        Listing existing = getListing(user, id);
-        checkCanChange(existing);
-        listingRepository.deleteOwned(id, current.getUsername());
+        ListingChangePreview preview = previewListingChange(user, id);
+        if (!preview.affectedVersions().isEmpty()) throw confirmationRequired();
+        deleteListing(user, id, preview);
+    }
+
+    /** Exact listing/proposal versions shown in the seller's confirmation dialog. */
+    public record ListingChangePreview(String listingId, long listingVersion, Map<String, Long> affectedVersions) {
+        public ListingChangePreview { affectedVersions = Map.copyOf(affectedVersions); }
+    }
+
+    public ListingChangePreview previewListingChange(User user, String id) throws SQLException {
+        Listing listing = getListing(user, id);
+        checkCanChange(listing);
+        List<Deal> affected = deals.findAffectedDeals(id);
+        requireNoAcceptedDeals(affected);
+        return new ListingChangePreview(id, listing.getRowVersion(), proposalVersions(affected));
+    }
+
+    public void updateListing(User user, String id, Listing changes, ListingChangePreview confirmed) throws SQLException {
+        validateListing(changes);
+        changeListing(user, id, changes, confirmed);
+    }
+
+    public void deleteListing(User user, String id, ListingChangePreview confirmed) throws SQLException {
+        changeListing(user, id, null, confirmed);
+    }
+
+    private void changeListing(User user, String id, Listing changes, ListingChangePreview confirmed) throws SQLException {
+        if (user == null || user.getUsername() == null || user.getUsername().isBlank()) {
+            throw new IllegalArgumentException("An active seller account is required.");
+        }
+        if (confirmed == null || !Objects.equals(id, confirmed.listingId())) throw confirmationRequired();
+        try (Connection conn = connections.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                Listing existing = listingRepository.findByIdAndSellerForUpdate(conn, id, user.getUsername());
+                if (existing == null) throw new IllegalArgumentException("Listing not found or no longer available to your account.");
+                User current = userRepository.findByUsername(conn, user.getUsername());
+                if (current == null || !current.isActive() || current.getRole() != UserRole.SELLER) {
+                    throw new IllegalArgumentException("An active seller account is required.");
+                }
+                checkCanChange(existing);
+                List<Deal> affected = deals.findAffectedDeals(conn, id);
+                requireNoAcceptedDeals(affected);
+                if (existing.getRowVersion() != confirmed.listingVersion()
+                        || !proposalVersions(affected).equals(confirmed.affectedVersions())) {
+                    throw new IllegalArgumentException("The listing or its proposals changed. Reload and confirm the latest details.");
+                }
+                LocalDateTime now = LocalDateTime.now();
+                for (Deal deal : affected) {
+                    if (!deals.updateStatus(conn, deal.getId(), deal.getStatus(), deal.getRowVersion(), DealStatus.CANCELLED, now)) {
+                        throw new IllegalArgumentException("A proposal changed. Reload and confirm again.");
+                    }
+                    notificationRepository.create(conn, new Notification(deal.getBuyerUsername(),
+                            changes == null ? "Listing Removed" : "Listing Changed",
+                            "The seller " + (changes == null ? "removed" : "edited") + " listing '"
+                                    + existing.getTitle() + "'. Your pending proposal was cancelled.", "Listing"));
+                }
+                if (changes == null) {
+                    listingRepository.deleteOwned(conn, id, current.getUsername());
+                } else {
+                    listingRepository.updateOwned(conn, id, current.getUsername(), changes);
+                    notifyAdminsOfResubmission(conn, changes.getTitle(), current.getUsername());
+                }
+                conn.commit();
+            } catch (SQLException | RuntimeException failure) {
+                try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+                throw failure;
+            }
+        }
+    }
+
+    private void notifyAdminsOfResubmission(Connection conn, String title, String seller) throws SQLException {
+        List<String> recipients = new java.util.ArrayList<>();
+        try (PreparedStatement stmt = conn.prepareStatement("SELECT username FROM users WHERE role = 'ADMIN' AND active = TRUE FOR SHARE");
+             ResultSet rows = stmt.executeQuery()) {
+            while (rows.next()) recipients.add(rows.getString("username"));
+        }
+        for (String recipient : recipients) notificationRepository.create(conn, new Notification(recipient,
+                "Listing Resubmitted for Review", "Listing '" + title + "' by @" + seller + " is waiting for review.", "New Listing"));
+    }
+
+    private static Map<String, Long> proposalVersions(List<Deal> affected) {
+        return affected.stream().collect(Collectors.toMap(Deal::getId, Deal::getRowVersion));
+    }
+
+    private static void requireNoAcceptedDeals(List<Deal> affected) {
+        if (affected.stream().anyMatch(deal -> deal.getStatus() == DealStatus.ACCEPTED)) {
+            throw new IllegalArgumentException("This listing has an accepted deal. Resolve the deal before editing or deleting it.");
+        }
+    }
+
+    private static IllegalArgumentException confirmationRequired() {
+        return new IllegalArgumentException("Review and confirm cancellation of the affected proposals before changing this listing.");
     }
 
     /**
@@ -188,16 +289,12 @@ public class ListingService {
 
     //check before opening the edit form and again before saving or deleting
     //this checks change restrictions only; getListing performs account and ownership checks
-    //offers still use the existing in-memory store until the offer flow moves to MySQL
+    //Pending proposal cancellation is rechecked in the confirmed change transaction.
     public void checkCanChange(Listing listing) {
         if (!Set.of(ListingStatus.PENDING_REVIEW, ListingStatus.LIVE, ListingStatus.REJECTED)
                 .contains(listing.getStatus())) {
             throw new IllegalArgumentException("Reserved, completed, or removed listings cannot be edited or deleted.");
         }
-        boolean activeOffer = DummyDataService.getInstance().getAllDeals().stream()
-                .anyMatch(deal -> Objects.equals(listing.getId(), deal.getListingId())
-                        && deal.getStatus().isOpen());
-        if (activeOffer) throw new IllegalArgumentException("Listings with active offers or requests cannot be edited or deleted.");
     }
 
     //creation and editing share the same field rules
