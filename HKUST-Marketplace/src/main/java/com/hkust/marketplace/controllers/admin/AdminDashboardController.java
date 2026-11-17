@@ -4,6 +4,7 @@ import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.ListingRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
+import com.hkust.marketplace.repositories.DealRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.utils.DummyDataService;
@@ -48,6 +49,7 @@ public class AdminDashboardController {
     private final ListingRepository listingRepository = new ListingRepository();
     private final ListingService listingService = new ListingService();
     private final NotificationRepository notificationRepository = new NotificationRepository();
+    private final DealRepository dealRepository = new DealRepository();
 
     @FXML
     public void initialize() {
@@ -949,30 +951,124 @@ public class AdminDashboardController {
         VBox root = new VBox(12);
         root.setPadding(new Insets(4));
 
-        HBox filters = new HBox(10);
-        filters.setAlignment(Pos.CENTER_LEFT);
         TextField search = new TextField();
-        search.setPromptText("Search by item / user...");
-        ComboBox<String> typeFilter = new ComboBox<>(FXCollections.observableArrayList("All Types", "Sell", "Lend", "Giveaway"));
-        typeFilter.getSelectionModel().selectFirst();
-        filters.getChildren().addAll(search, typeFilter);
-        root.getChildren().add(filters);
+        search.setPromptText("Search by item title, buyer or seller username...");
+        search.setPrefWidth(320);
 
-        TableView<String[]> table = new TableView<>();
+        ComboBox<String> typeFilter = new ComboBox<>(FXCollections.observableArrayList(
+                "All Types", "Bought", "Borrowed", "Received"));
+        typeFilter.getSelectionModel().selectFirst();
+
+        Button searchBtn = new Button("Search");
+        searchBtn.getStyleClass().addAll("btn-primary", "btn-sm");
+        Button resetBtn = new Button("Reset");
+        resetBtn.getStyleClass().addAll("btn-outline", "btn-sm");
+        HBox filters = new HBox(10, new Label("Deal Type:"), typeFilter, search, searchBtn, resetBtn);
+        filters.setAlignment(Pos.CENTER_LEFT);
+
+        Label countLabel = new Label();
+        countLabel.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
+        Label errorLabel = new Label();
+        errorLabel.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
+        errorLabel.setWrapText(true);
+        errorLabel.setVisible(false);
+        errorLabel.managedProperty().bind(errorLabel.visibleProperty());
+
+        TableView<Deal> table = new TableView<>();
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        String[] headers = {"Item", "Buyer", "Seller", "Type", "Status", "Date"};
-        for (int i = 0; i < headers.length; i++) {
-            final int idx = i;
-            TableColumn<String[], String> col = new TableColumn<>(headers[i]);
-            col.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[idx]));
-            table.getColumns().add(col);
-        }
-        table.setItems(FXCollections.observableArrayList(
-                new String[]{"Calculus Textbook", "alice", "charlie", "Sell", "Accepted", "2026-01-15"},
-                new String[]{"USB Hub", "bob", "diana", "Giveaway", "Completed", "2025-12-01"}
-        ));
-        root.getChildren().add(table);
+        table.setPlaceholder(new Label("No deals found."));
+
+        TableColumn<Deal, String> titleCol = new TableColumn<>("Item Title");
+        titleCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
+                c.getValue().getListingTitle()));
+        TableColumn<Deal, String> buyerCol = new TableColumn<>("Buyer Username");
+        buyerCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
+                c.getValue().getBuyerUsername()));
+        TableColumn<Deal, String> sellerCol = new TableColumn<>("Seller Username");
+        sellerCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
+                c.getValue().getSellerUsername()));
+        TableColumn<Deal, String> typeCol = new TableColumn<>("Deal Type");
+        typeCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
+                dealTypeDisplay(c.getValue().getDealType())));
+        TableColumn<Deal, String> startCol = new TableColumn<>("Start Date");
+        startCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
+                dealStartDisplay(c.getValue())));
+        TableColumn<Deal, String> endCol = new TableColumn<>("Return / Complete Date");
+        endCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
+                dealEndDisplay(c.getValue())));
+        TableColumn<Deal, String> statusCol = new TableColumn<>("Status");
+        statusCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
+                c.getValue().getStatus() == null ? "—" : c.getValue().getStatus().getDisplayName()));
+        table.getColumns().addAll(titleCol, buyerCol, sellerCol, typeCol, startCol, endCol, statusCol);
+
+        // The combo listener is suppressed while Reset sets the selection programmatically.
+        boolean[] suppressReload = {false};
+        Runnable reload = () -> {
+            ListingType selectedType = switch (typeFilter.getSelectionModel().getSelectedIndex()) {
+                case 1 -> ListingType.SELL;
+                case 2 -> ListingType.LEND;
+                case 3 -> ListingType.GIVEAWAY;
+                default -> null;
+            };
+            try {
+                List<Deal> deals = dealRepository.searchDeals(search.getText(), selectedType,
+                        null, null, null);
+                table.setItems(FXCollections.observableArrayList(deals));
+                countLabel.setText(deals.size() + (deals.size() == 1 ? " deal" : " deals"));
+                errorLabel.setVisible(false);
+            } catch (SQLException ex) {
+                LOGGER.log(Level.SEVERE, "Failed to load deals from the database.", ex);
+                table.setItems(FXCollections.observableArrayList());
+                countLabel.setText("");
+                errorLabel.setText("Unable to load deals. Please try again.");
+                errorLabel.setVisible(true);
+            }
+        };
+
+        searchBtn.setOnAction(event -> reload.run());
+        search.setOnAction(event -> reload.run());
+        typeFilter.setOnAction(event -> {
+            if (!suppressReload[0]) reload.run();
+        });
+        resetBtn.setOnAction(event -> {
+            suppressReload[0] = true;
+            search.clear();
+            typeFilter.getSelectionModel().selectFirst();
+            suppressReload[0] = false;
+            reload.run();
+        });
+
+        root.getChildren().addAll(filters, errorLabel, countLabel, table);
+        VBox.setVgrow(table, Priority.ALWAYS);
         contentPane.getChildren().add(root);
+        reload.run();
+    }
+
+    /** Database deal types are BOUGHT/BORROWED/RECEIVED; the model exposes ListingType. */
+    private String dealTypeDisplay(ListingType type) {
+        if (type == null) return "—";
+        return switch (type) {
+            case SELL -> "Bought";
+            case LEND -> "Borrowed";
+            case GIVEAWAY -> "Received";
+        };
+    }
+
+    /** Borrowed deals start at the borrowing start; other deals start at creation. */
+    private String dealStartDisplay(Deal deal) {
+        LocalDateTime start = deal.getBorrowStart() != null ? deal.getBorrowStart() : deal.getCreatedAt();
+        return formatDealDate(start);
+    }
+
+    /** Returned deals show the return time, completed deals the completion time. */
+    private String dealEndDisplay(Deal deal) {
+        LocalDateTime end = deal.getReturnedAt() != null ? deal.getReturnedAt() : deal.getCompletedAt();
+        return end == null ? "—" : formatDealDate(end);
+    }
+
+    private String formatDealDate(LocalDateTime value) {
+        return value == null ? "—"
+                : value.format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.ENGLISH));
     }
 
     @FXML
