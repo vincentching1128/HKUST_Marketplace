@@ -1,12 +1,13 @@
 package com.hkust.marketplace.controllers.buyer;
 
-import com.hkust.marketplace.models.Notification;
 import com.hkust.marketplace.models.User;
+import com.hkust.marketplace.models.UserRole;
+import com.hkust.marketplace.controllers.NotificationBoard;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.NotificationService;
 import com.hkust.marketplace.services.BuyerListingService;
-import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.collections.FXCollections;
@@ -16,9 +17,7 @@ import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
-import java.time.format.DateTimeFormatter;
 import java.sql.SQLException;
-import java.util.List;
 
 public class BuyerDashboardController {
 
@@ -32,6 +31,7 @@ public class BuyerDashboardController {
     @FXML private Button btnBrowse, btnDeals, btnHistory, btnFavourites, btnNotifications, btnProfile;
 
     private Button currentActiveBtn;
+    private NotificationBoard notificationBoard;
     private BuyerListingsPane listingsPane;
 
     @FXML
@@ -45,6 +45,9 @@ public class BuyerDashboardController {
     }
 
     private void setActive(Button btn, String title) {
+        if (notificationBoard != null && btn != btnNotifications) {
+            notificationBoard.deactivate();
+        }
         if (currentActiveBtn != null) {
             currentActiveBtn.getStyleClass().remove("sidebar-btn-active");
         }
@@ -166,40 +169,18 @@ public class BuyerDashboardController {
 
     @FXML
     private void showNotifications() {
-        setActive(btnNotifications, "Notification Board");
-        contentPane.getChildren().clear();
-
-        VBox root = new VBox(12);
-        root.setPadding(new Insets(4));
-
-        User user = SessionManager.getCurrentUser();
-        List<Notification> notifs = DummyDataService.getInstance()
-                .getNotificationsFor(user != null ? user.getUsername() : "");
-
-        if (notifs.isEmpty()) {
-            Label empty = new Label("No notifications yet.");
-            empty.setStyle("-fx-text-fill: #5a5a7a;");
-            root.getChildren().add(empty);
-        } else {
-            for (Notification n : notifs) {
-                VBox item = new VBox(4);
-                item.getStyleClass().add("notif-item");
-                Label title = new Label(n.getTitle());
-                title.setStyle("-fx-font-weight: bold; -fx-text-fill: #1a1a2e;");
-                Label msg = new Label(n.getMessage());
-                msg.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 13px;");
-                msg.setWrapText(true);
-                Label meta = new Label(n.getCategory() + " · " +
-                        n.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm")));
-                meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
-                item.getChildren().addAll(title, msg, meta);
-                root.getChildren().add(item);
-            }
+        setActive(btnNotifications, "Notifications");
+        User recipient = SessionManager.getCurrentUser();
+        if (recipient == null) {
+            SceneManager.showBuyerLogin();
+            return;
         }
-
-        ScrollPane scroll = new ScrollPane(root);
-        scroll.setFitToWidth(true);
-        contentPane.getChildren().add(scroll);
+        if (notificationBoard == null) {
+            notificationBoard = new NotificationBoard(
+                    new NotificationService(userRepository, notificationRepository, UserRole.BUYER));
+        }
+        contentPane.getChildren().setAll(notificationBoard);
+        notificationBoard.show(recipient);
     }
 
     @FXML

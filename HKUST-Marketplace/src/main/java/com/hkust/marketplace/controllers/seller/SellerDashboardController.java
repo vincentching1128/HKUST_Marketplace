@@ -1,11 +1,12 @@
 package com.hkust.marketplace.controllers.seller;
 
 import com.hkust.marketplace.models.*;
+import com.hkust.marketplace.controllers.NotificationBoard;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.NotificationService;
 import com.hkust.marketplace.services.ListingService;
-import com.hkust.marketplace.services.SellerNotificationService;
 import com.hkust.marketplace.services.DealService;
 import com.hkust.marketplace.services.ChatService;
 import com.hkust.marketplace.controllers.ChatInboxPane;
@@ -43,15 +44,13 @@ public class SellerDashboardController {
     private final UserRepository userRepository = new UserRepository();
     private final ListingService listingService = new ListingService();
     private final NotificationRepository notificationRepository = new NotificationRepository();
-    private final SellerNotificationService sellerNotifications = new SellerNotificationService(userRepository, notificationRepository);
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
     @FXML private Label welcomeLabel;
     @FXML private Button btnListings, btnCreate, btnOffers, btnChats, btnStats, btnReviews, btnNotifications, btnProfile;
 
     private Button currentActiveBtn;
-    private boolean includeReadNotifications;
-    private long notificationRequest;
+    private NotificationBoard notificationBoard;
     private SellerOffersPane offersPane;
     private final ChatService chatService = new ChatService();
     private ChatInboxPane chatInbox;
@@ -67,11 +66,13 @@ public class SellerDashboardController {
     }
 
     private void setActive(Button btn, String title) {
+        if (notificationBoard != null && btn != btnNotifications) {
+            notificationBoard.deactivate();
+        }
         if (offersPane != null) offersPane.deactivate();
         if (chatInbox != null) chatInbox.deactivate();
         if (chatPane != null) chatPane.deactivate();
         chatRequest++;
-        notificationRequest++;
         if (currentActiveBtn != null) currentActiveBtn.getStyleClass().remove("sidebar-btn-active");
         btn.getStyleClass().add("sidebar-btn-active");
         currentActiveBtn = btn;
@@ -804,88 +805,17 @@ public class SellerDashboardController {
     @FXML
     private void showNotifications() {
         setActive(btnNotifications, "Notifications");
-        User seller = SessionManager.getCurrentUser();
-        if (seller == null) { SceneManager.showSellerLogin(); return; }
-        long request = ++notificationRequest;
-        boolean includeRead = includeReadNotifications;
-        VBox root = new VBox(12);
-        root.setPadding(new Insets(4));
-        CheckBox history = new CheckBox("Show read notifications");
-        history.setSelected(includeRead);
-        history.setOnAction(event -> { includeReadNotifications = history.isSelected(); showNotifications(); });
-        Button refresh = new Button("Refresh");
-        refresh.getStyleClass().add("btn-outline");
-        refresh.setOnAction(event -> showNotifications());
-        root.getChildren().add(new HBox(12, refresh, history));
-        VBox inbox = new VBox(12, new Label("Loading notifications..."), new ProgressIndicator());
-        root.getChildren().add(inbox);
-        ScrollPane scroll = new ScrollPane(root);
-        scroll.setFitToWidth(true);
-        contentPane.getChildren().setAll(scroll);
-        Task<List<Notification>> load = new Task<>() {
-            @Override protected List<Notification> call() throws SQLException {
-                return sellerNotifications.getNotifications(seller, includeRead);
-            }
-        };
-        load.setOnSucceeded(event -> {
-            if (!currentNotificationRequest(request, seller)) return;
-            inbox.getChildren().clear();
-            if (load.getValue().isEmpty()) inbox.getChildren().add(new Label(includeRead ? "No notifications." : "No unread notifications."));
-            for (Notification notification : load.getValue()) inbox.getChildren().add(notificationCard(notification, seller));
-        });
-        load.setOnFailed(event -> {
-            if (!currentNotificationRequest(request, seller)) return;
-            String message = load.getException() instanceof IllegalArgumentException
-                    ? load.getException().getMessage() : "Unable to load notifications. Use Refresh to try again.";
-            Label error = new Label(message);
-            error.setWrapText(true);
-            error.setStyle("-fx-text-fill: #c62828;");
-            inbox.getChildren().setAll(error);
-        });
-        Thread thread = new Thread(load, "seller-notification-load");
-        thread.setDaemon(true);
-        thread.start();
-    }
-
-    private boolean currentNotificationRequest(long request, User seller) {
-        User current = SessionManager.getCurrentUser();
-        return request == notificationRequest && currentActiveBtn == btnNotifications
-                && current != null && java.util.Objects.equals(current.getUsername(), seller.getUsername());
-    }
-
-    private VBox notificationCard(Notification notification, User seller) {
-        Label title = new Label(notification.getTitle());
-        title.setWrapText(true);
-        title.setStyle("-fx-font-weight: " + (notification.isRead() ? "normal" : "bold") + ";");
-        Label message = new Label(notification.getMessage());
-        message.setWrapText(true);
-        Label meta = new Label(notification.getCategory() + " · " + (notification.getTimestamp() == null
-                ? "Unknown time" : notification.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm"))));
-        meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
-        Button read = new Button(notification.isRead() ? "Read" : "Mark as read");
-        read.getStyleClass().addAll("btn-outline", "btn-sm");
-        read.setDisable(notification.isRead());
-        read.setOnAction(event -> {
-            long request = notificationRequest;
-            read.setDisable(true);
-            Task<Boolean> save = new Task<>() {
-                @Override protected Boolean call() throws SQLException {
-                    return sellerNotifications.markAsRead(seller, notification.getId());
-                }
-            };
-            save.setOnSucceeded(done -> { if (currentNotificationRequest(request, seller)) showNotifications(); });
-            save.setOnFailed(done -> {
-                if (!currentNotificationRequest(request, seller)) return;
-                read.setDisable(false);
-                new Alert(Alert.AlertType.ERROR, "Unable to mark this notification as read. Please try again.").showAndWait();
-            });
-            Thread thread = new Thread(save, "seller-notification-read");
-            thread.setDaemon(true);
-            thread.start();
-        });
-        VBox item = new VBox(6, title, message, new HBox(12, meta, read));
-        item.getStyleClass().add("notif-item");
-        return item;
+        User recipient = SessionManager.getCurrentUser();
+        if (recipient == null) {
+            SceneManager.showSellerLogin();
+            return;
+        }
+        if (notificationBoard == null) {
+            notificationBoard = new NotificationBoard(
+                    new NotificationService(userRepository, notificationRepository, UserRole.SELLER));
+        }
+        contentPane.getChildren().setAll(notificationBoard);
+        notificationBoard.show(recipient);
     }
 
     @FXML
