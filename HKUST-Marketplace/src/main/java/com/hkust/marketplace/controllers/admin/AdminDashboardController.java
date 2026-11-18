@@ -1,11 +1,13 @@
 package com.hkust.marketplace.controllers.admin;
 
 import com.hkust.marketplace.models.*;
+import com.hkust.marketplace.controllers.NotificationBoard;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.ListingRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.repositories.DealRepository;
 import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.NotificationService;
 import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
@@ -45,6 +47,7 @@ public class AdminDashboardController {
     @FXML private Button btnReview, btnAllListings, btnUsers, btnDeals, btnRatings, btnNotifications, btnProfile;
 
     private Button currentActiveBtn;
+    private NotificationBoard notificationBoard;
     private final UserRepository userRepository = new UserRepository();
     private final ListingRepository listingRepository = new ListingRepository();
     private final ListingService listingService = new ListingService();
@@ -60,6 +63,9 @@ public class AdminDashboardController {
     }
 
     private void setActive(Button btn, String title) {
+        if (notificationBoard != null && btn != btnNotifications) {
+            notificationBoard.deactivate();
+        }
         if (currentActiveBtn != null) currentActiveBtn.getStyleClass().remove("sidebar-btn-active");
         btn.getStyleClass().add("sidebar-btn-active");
         currentActiveBtn = btn;
@@ -1120,92 +1126,18 @@ public class AdminDashboardController {
 
     @FXML
     private void showNotifications() {
-        setActive(btnNotifications, "Admin Notifications");
-        contentPane.getChildren().clear();
-
-        VBox root = new VBox(12);
-        root.setPadding(new Insets(4));
-
-        User admin = SessionManager.getCurrentUser();
-        if (admin == null) {
+        setActive(btnNotifications, "Notifications");
+        User recipient = SessionManager.getCurrentUser();
+        if (recipient == null) {
             SceneManager.showAdminLogin();
             return;
         }
-
-        List<Notification> notifications;
-        try {
-            notifications = notificationRepository.findByRecipient(admin.getUsername());
-        } catch (SQLException ex) {
-            LOGGER.log(Level.SEVERE, "Failed to load notifications.", ex);
-            Label error = new Label("Unable to load notifications. Please try again.");
-            error.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
-            error.setWrapText(true);
-            Button retry = new Button("Retry");
-            retry.getStyleClass().add("btn-outline");
-            retry.setOnAction(event -> showNotifications());
-            root.getChildren().addAll(error, retry);
-            ScrollPane errorScroll = new ScrollPane(root);
-            errorScroll.setFitToWidth(true);
-            contentPane.getChildren().add(errorScroll);
-            return;
+        if (notificationBoard == null) {
+            notificationBoard = new NotificationBoard(
+                    new NotificationService(userRepository, notificationRepository, UserRole.ADMIN));
         }
-
-        if (notifications.isEmpty()) {
-            root.getChildren().add(new Label("No notifications."));
-        } else {
-            for (Notification n : notifications) {
-                VBox item = new VBox(6);
-                item.getStyleClass().add("notif-item");
-
-                Label title = new Label(n.getTitle());
-                title.setWrapText(true);
-                title.setStyle("-fx-text-fill: #1a1a2e; -fx-font-weight: " + (n.isRead() ? "normal" : "bold") + ";");
-
-                Label message = new Label(n.getMessage());
-                message.setWrapText(true);
-                message.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 13px;");
-
-                Label meta = new Label(n.getCategory() + " · "
-                        + (n.getTimestamp() == null ? "unknown time"
-                        : n.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.ENGLISH))));
-                meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
-
-                Button read = new Button(n.isRead() ? "Read" : "Mark as read");
-                read.getStyleClass().addAll("btn-outline", "btn-sm");
-                read.setDisable(n.isRead());
-                read.setOnAction(event -> markNotificationRead(n));
-
-                Region spacer = new Region();
-                HBox.setHgrow(spacer, Priority.ALWAYS);
-                HBox footer = new HBox(10, meta, spacer, read);
-                footer.setAlignment(Pos.CENTER_LEFT);
-
-                item.getChildren().addAll(title, message, footer);
-                root.getChildren().add(item);
-            }
-        }
-
-        ScrollPane scroll = new ScrollPane(root);
-        scroll.setFitToWidth(true);
-        contentPane.getChildren().add(scroll);
-    }
-
-    /** Marks one notification read and reloads the board so the button state updates. */
-    private void markNotificationRead(Notification notification) {
-        try {
-            if (!notificationRepository.markAsRead(notification.getId())) {
-                //already read or removed between loading and clicking; refresh to show the truth
-                showNotifications();
-                return;
-            }
-            showNotifications();
-        } catch (IllegalArgumentException invalid) {
-            new Alert(Alert.AlertType.WARNING, invalid.getMessage()).showAndWait();
-        } catch (SQLException ex) {
-            LOGGER.log(Level.SEVERE, "Failed to mark notification as read.", ex);
-            new Alert(Alert.AlertType.ERROR,
-                    "Unable to mark this notification as read. Please try again.").showAndWait();
-        }
+        contentPane.getChildren().setAll(notificationBoard);
+        notificationBoard.show(recipient);
     }
 
     @FXML

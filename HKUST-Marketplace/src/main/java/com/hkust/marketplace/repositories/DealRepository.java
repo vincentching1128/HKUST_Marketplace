@@ -144,6 +144,23 @@ public class DealRepository {
      * The service must authenticate the buyer before calling this method.
      */
     public String create(Deal deal) throws SQLException {
+        try (Connection connection = connections.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                String id = create(connection, deal);
+                connection.commit();
+                return id;
+            } catch (SQLException | RuntimeException failure) {
+                try { connection.rollback(); }
+                catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+                throw failure;
+            }
+        }
+    }
+
+    /** Insert a proposal within the caller's deal/notification transaction. */
+    public String create(Connection connection, Deal deal) throws SQLException {
+        requireTransaction(connection);
         if (deal == null) throw new IllegalArgumentException("A deal is required.");
         if (deal.getStatus() != DealStatus.PENDING) {
             throw new IllegalArgumentException("New deals must start as PENDING.");
@@ -175,38 +192,28 @@ public class DealRepository {
                     status, offeredPrice, borrowStartDate, borrowDueDate, createdDate, completedDate)
                 VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, NULL)
                 """;
-        try (Connection connection = connections.getConnection()) {
-            connection.setAutoCommit(false);
-            try {
-                ValidatedParties parties = validateNewDeal(connection, deal.getBuyerUsername(),
-                        deal.getListingId(), deal.getDealType());
-                requireNoAcceptedDeal(connection, deal.getListingId(), id);
-                try (PreparedStatement statement = connection.prepareStatement(sql)) {
-                    statement.setString(1, id);
-                    statement.setString(2, parties.buyerUsername());
-                    statement.setString(3, parties.sellerUsername());
-                    statement.setString(4, deal.getListingId());
-                    statement.setString(5, type);
-                    statement.setBigDecimal(6, price);
-                    statement.setTimestamp(7, dateTimestamp(deal.getBorrowStart()));
-                    statement.setTimestamp(8, dateTimestamp(deal.getBorrowEnd()));
-                    statement.setTimestamp(9, Timestamp.valueOf(created));
-                    if (statement.executeUpdate() != 1) throw new SQLException("The deal could not be created.");
-                }
-                connection.commit();
-                deal.setId(id);
-                deal.setBuyerUsername(parties.buyerUsername());
-                deal.setSellerUsername(parties.sellerUsername());
-                deal.setStatus(DealStatus.PENDING);
-                deal.setRowVersion(1);
-                deal.setCreatedAt(created);
-                return id;
-            } catch (SQLException | RuntimeException failure) {
-                try { connection.rollback(); }
-                catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
-                throw failure;
-            }
+        ValidatedParties parties = validateNewDeal(connection, deal.getBuyerUsername(),
+                deal.getListingId(), deal.getDealType());
+        requireNoAcceptedDeal(connection, deal.getListingId(), id);
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, id);
+            statement.setString(2, parties.buyerUsername());
+            statement.setString(3, parties.sellerUsername());
+            statement.setString(4, deal.getListingId());
+            statement.setString(5, type);
+            statement.setBigDecimal(6, price);
+            statement.setTimestamp(7, dateTimestamp(deal.getBorrowStart()));
+            statement.setTimestamp(8, dateTimestamp(deal.getBorrowEnd()));
+            statement.setTimestamp(9, Timestamp.valueOf(created));
+            if (statement.executeUpdate() != 1) throw new SQLException("The deal could not be created.");
         }
+        deal.setId(id);
+        deal.setBuyerUsername(parties.buyerUsername());
+        deal.setSellerUsername(parties.sellerUsername());
+        deal.setStatus(DealStatus.PENDING);
+        deal.setRowVersion(1);
+        deal.setCreatedAt(created);
+        return id;
     }
 
     private List<Deal> query(String where, List<?> parameters) throws SQLException {
