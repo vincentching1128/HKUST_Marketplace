@@ -568,7 +568,7 @@ public class AdminDashboardController {
                         int duration = Integer.parseInt(durationField.getText().trim());
                         if (duration <= 0 || unitCombo.getValue() == null) {
                             new Alert(Alert.AlertType.WARNING,
-                                    "Enter a positive whole-number lending duration and select Days, Weeks, or Months.").showAndWait();
+                                    "Enter a positive whole-number lending duration and select a unit.").showAndWait();
                             return;
                         }
                         listing.setLendingDuration(duration);

@@ -443,6 +443,12 @@ public class DealRepository {
                 + "AND d.borrowDueDate <= ?", List.of(dateTimestamp(cutoff)));
     }
 
+    public List<Deal> findBorrowingsNearingDueDate(LocalDateTime now, LocalDateTime cutoff) throws SQLException {
+        return query("WHERE d.dealType = 'BORROWED' AND d.status = 'ACCEPTED' "
+                + "AND d.borrowDueDate > ? AND d.borrowDueDate < ?",
+                List.of(dateTimestamp(now), dateTimestamp(cutoff)));
+    }
+
     private void requireNoAcceptedDeal(Connection connection, String listingId, String excludingId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT id FROM deals WHERE listing_id = ? AND status = 'ACCEPTED' AND id <> ? FOR UPDATE")) {
