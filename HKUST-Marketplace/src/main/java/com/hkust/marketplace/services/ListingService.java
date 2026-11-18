@@ -20,8 +20,13 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class ListingService {
+    private static final Logger LOGGER = Logger.getLogger(ListingService.class.getName());
+    private static final int NOTIFICATION_REASON_LIMIT = 500;
+
     private final UserRepository userRepository;
     private final ListingRepository listingRepository;
     private final NotificationRepository notificationRepository;
@@ -155,7 +160,59 @@ public class ListingService {
         if (sellerUsername == null || sellerUsername.isBlank()) {
             throw new IllegalArgumentException("A seller username is required.");
         }
-        return listingRepository.removeListing(listingId, sellerUsername, reason);
+        //read the listing and its open proposals before the status change so the
+        //notifications can name the item and reach every affected buyer
+        Listing listing = listingRepository.findByIdAndSeller(listingId, sellerUsername);
+        List<Deal> affectedDeals = deals.findAffectedDeals(listingId);
+        boolean removed = listingRepository.removeListing(listingId, sellerUsername, reason);
+        if (!removed) {
+            return false;
+        }
+        String title = listing == null ? "the listing" : "'" + listing.getTitle() + "'";
+        notifyListingRemoved(sellerUsername, title, shortened(reason), affectedDeals);
+        return true;
+    }
+
+    /**
+     * Notifies the seller and every buyer with an open proposal (PENDING, COUNTERED or
+     * ACCEPTED) on the removed listing. Best-effort: the listing is already removed, so a
+     * notification failure is logged instead of failing the takedown.
+     */
+    private void notifyListingRemoved(String sellerUsername, String title, String reason,
+                                      List<Deal> affectedDeals) {
+        sendNotification(sellerUsername, "Listing Removed",
+                "Your listing " + title + " was removed by an administrator. Reason: " + reason);
+        Set<String> buyers = new java.util.LinkedHashSet<>();
+        for (Deal deal : affectedDeals) {
+            String buyer = deal.getBuyerUsername();
+            if (buyer != null && !buyer.isBlank() && !buyer.equalsIgnoreCase(sellerUsername)) {
+                buyers.add(buyer);
+            }
+        }
+        for (String buyer : buyers) {
+            sendNotification(buyer, "Listing Removed",
+                    "The listing " + title + " you made an offer on was removed by an administrator."
+                            + " Reason: " + reason);
+        }
+    }
+
+    /** Persists one listing-related notification; notification failures never block an action. */
+    private void sendNotification(String username, String title, String message) {
+        if (username == null || username.isBlank()) return;
+        try {
+            notificationRepository.create(new Notification(username, title, message, "Listing"));
+        } catch (SQLException ex) {
+            LOGGER.log(Level.WARNING, "Failed to create listing notification for " + username, ex);
+        } catch (IllegalArgumentException invalid) {
+            LOGGER.log(Level.WARNING, "Invalid listing notification for " + username, invalid);
+        }
+    }
+
+    private static String shortened(String reason) {
+        String text = reason == null ? "" : reason.strip();
+        if (text.codePointCount(0, text.length()) <= NOTIFICATION_REASON_LIMIT) return text;
+        int end = text.offsetByCodePoints(0, NOTIFICATION_REASON_LIMIT);
+        return text.substring(0, end) + "...";
     }
 
     //load an owned listing in any status; edit/delete apply their extra checks separately

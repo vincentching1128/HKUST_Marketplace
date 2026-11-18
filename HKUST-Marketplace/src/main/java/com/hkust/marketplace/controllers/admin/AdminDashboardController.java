@@ -241,7 +241,7 @@ public class AdminDashboardController {
                 new Alert(Alert.AlertType.WARNING,
                         "This listing changed while you were reviewing it. The review queue will reload.").showAndWait();
             }
-
+            notifySellerOfApproval(target);
         }catch(SQLException ex){
             LOGGER.log(Level.SEVERE, "Failed to approve listing " + target.getId(), ex);
             new Alert(Alert.AlertType.ERROR, "Unable to approve this listing. Please try again.").showAndWait();
@@ -253,7 +253,9 @@ public class AdminDashboardController {
             if(!listingRepository.updateReview(target.getId(), ListingStatus.REJECTED, reason, target.getRowVersion())){
                 new Alert(Alert.AlertType.WARNING,
                         "This listing changed while you were reviewing it. The review queue will reload.").showAndWait();
+                return;
             }
+            notifySellerOfRejection(target, reason);
         }catch(IllegalArgumentException invalidReason){
             new Alert(Alert.AlertType.WARNING, invalidReason.getMessage()).showAndWait();
         } catch (SQLException ex) {
@@ -261,6 +263,40 @@ public class AdminDashboardController {
             new Alert(Alert.AlertType.ERROR, "Unable to reject this listing. Please try again.").showAndWait();
         }
 
+    }
+    private void notifySellerOfApproval(Listing listing) {
+        try {
+            notificationRepository.create(new Notification(
+                    listing.getSellerUsername(), "Listing Approved",
+                    "Your listing '" + listing.getTitle() + "' was approved. " ,
+                    "Listing"));
+        } catch (SQLException ex) {
+            LOGGER.log(Level.WARNING, "Failed to notify seller about the approved listing.", ex);
+        } catch (IllegalArgumentException invalid) {
+            LOGGER.log(Level.WARNING, "Invalid approva; notification.", invalid);
+        }
+    }
+
+    /** Best-effort seller notification once the rejection has been persisted. */
+    private void notifySellerOfRejection(Listing listing, String reason) {
+        String safeReason = shortenForNotification(reason);
+        try {
+            notificationRepository.create(new Notification(
+                    listing.getSellerUsername(), "Listing Rejected",
+                    "Your listing '" + listing.getTitle() + "' was rejected. Reason: " + safeReason,
+                    "Listing"));
+        } catch (SQLException ex) {
+            LOGGER.log(Level.WARNING, "Failed to notify seller about the rejected listing.", ex);
+        } catch (IllegalArgumentException invalid) {
+            LOGGER.log(Level.WARNING, "Invalid rejection notification.", invalid);
+        }
+    }
+
+    private static String shortenForNotification(String reason) {
+        String text = reason == null ? "" : reason.strip();
+        if (text.codePointCount(0, text.length()) <= 500) return text;
+        int end = text.offsetByCodePoints(0, 500);
+        return text.substring(0, end) + "...";
     }
     @FXML
     private void showAllListings() {
