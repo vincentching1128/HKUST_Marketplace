@@ -6,17 +6,24 @@ import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.utils.DatabaseManager;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.UUID;
 
 /** Buyer proposal and completion rules. Every state change and notification commits together. */
 public class BuyerDealService {
+    private static final Duration REMINDER_LEAD = Duration.ofDays(1);
+    private static final DateTimeFormatter DUE_TIME =
+            DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm:ss", Locale.ENGLISH);
     private final DealRepository deals;
     private final UserRepository users;
     private final NotificationRepository notifications;
@@ -149,6 +156,32 @@ public class BuyerDealService {
             if (changed) returned++;
         }
         return returned;
+    }
+
+    public void remindDueBorrowings() throws SQLException {
+        LocalDateTime now = LocalDateTime.now(clock);
+        for (Deal candidate : deals.findBorrowingsNearingDueDate(now, now.plus(REMINDER_LEAD))) {
+            inTransaction(connection -> {
+                Deal deal = deals.findByIdForUpdate(connection, candidate.getId()).orElse(null);
+                if (deal == null || !reminderDue(deal, LocalDateTime.now(clock))) return;
+
+                // The same delivery ID survives restarts and concurrent app sessions.
+                String reminderId = UUID.nameUUIDFromBytes(
+                        ("borrow-due-reminder:" + deal.getId()).getBytes(StandardCharsets.UTF_8)).toString();
+                if (notifications.existsForUpdate(connection, reminderId)) return;
+                Notification reminder = new Notification(deal.getBuyerUsername(), "Borrowing Due Soon",
+                        "Your borrowing for '" + deal.getListingTitle() + "' is due on "
+                                + deal.getBorrowEnd().format(DUE_TIME) + ".", "Borrow");
+                reminder.setId(reminderId);
+                notifications.create(connection, reminder);
+            });
+        }
+    }
+
+    private static boolean reminderDue(Deal deal, LocalDateTime now) {
+        LocalDateTime end = deal.getBorrowEnd();
+        return deal.getStatus() == DealStatus.ACCEPTED && deal.getDealType() == ListingType.LEND
+                && end != null && end.isAfter(now) && end.isBefore(now.plus(REMINDER_LEAD));
     }
 
     private void cancelCompetitors(Connection connection, Deal accepted, LocalDateTime now) throws SQLException {

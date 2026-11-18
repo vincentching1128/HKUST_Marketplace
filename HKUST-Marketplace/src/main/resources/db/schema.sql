@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS listings (
     description TEXT NOT NULL,
     item_condition ENUM ( 'USED', 'LIKE_NEW', 'FOR_PARTS', 'NEW') NOT NULL,
     lending_duration INT,
-    lending_unit ENUM('DAYS', 'WEEKS', 'MONTHS'),
+    lending_unit ENUM('DAYS', 'WEEKS', 'MONTHS', 'SECONDS'),
     meetup_location VARCHAR(100) NOT NULL,
     posted_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     reviewed_at DATETIME(6),

@@ -54,6 +54,17 @@ public class NotificationRepository {
         insert(connection, notification, prepare(notification));
     }
 
+    /** Use a current read when checking a delivery ID after acquiring the deal lock. */
+    public boolean existsForUpdate(Connection connection, String notificationId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT id FROM notifications WHERE id = ? FOR UPDATE")) {
+            statement.setString(1, notificationId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next();
+            }
+        }
+    }
+
     private record NotificationValues(String username, String category, String title, String message) {}
 
     private NotificationValues prepare(Notification notification) {

@@ -18,7 +18,7 @@ public class Listing {
     private String condition;          // New / Like New / Used / For Parts
     private Double price;              // Only for SELL
     private Integer lendingDuration;  // Only for LEND
-    private LendingUnit lendingUnit;   // DAYS / WEEKS / MONTHS
+    private LendingUnit lendingUnit;
     private String meetupLocation;
     private String sellerUsername;
     private String sellerFullName;

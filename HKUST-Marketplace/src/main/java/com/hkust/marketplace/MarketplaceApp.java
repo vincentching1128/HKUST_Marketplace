@@ -48,6 +48,16 @@ public class MarketplaceApp extends Application {
                     System.err.println("Borrow auto-return check failed: " + failure.getMessage());
             }
         }, 5, 5, TimeUnit.SECONDS);
+        AtomicBoolean reminderCheckFailed = new AtomicBoolean();
+        returns.scheduleWithFixedDelay(() -> {
+            try {
+                deals.remindDueBorrowings();
+                reminderCheckFailed.set(false);
+            } catch (Exception failure) {
+                if (!reminderCheckFailed.getAndSet(true))
+                    System.err.println("Borrow reminder check failed: " + failure.getMessage());
+            }
+        }, 1, 1, TimeUnit.SECONDS);
     }
 
     @Override public void stop() {
