@@ -32,6 +32,10 @@ public class ChatPane extends VBox {
     private static final DateTimeFormatter DATE=DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm:ss");
 
     public ChatPane(ChatService service,Supplier<User> user,String threadId,Runnable back) {
+        this(service,user,threadId,back,null);
+    }
+
+    public ChatPane(ChatService service,Supplier<User> user,String threadId,Runnable back,Runnable propose) {
         super(12);this.service=Objects.requireNonNull(service);this.user=Objects.requireNonNull(user);this.threadId=Objects.requireNonNull(threadId);
         setPadding(new Insets(4));heading.setWrapText(true);heading.setStyle("-fx-font-size: 18px; -fx-font-weight: bold;");
         Button leave=new Button("Back to Chats");leave.getStyleClass().add("btn-outline");leave.setOnAction(e->back.run());
@@ -44,7 +48,14 @@ public class ChatPane extends VBox {
         compose.setWrapText(true);compose.setPrefRowCount(3);compose.setPromptText("Write a private message (up to 4,000 characters)");
         send.getStyleClass().add("btn-primary");send.setOnAction(e->send());
         compose.textProperty().addListener((obs,old,value)->updateControls());
-        getChildren().addAll(new HBox(12,leave,refresh),heading,new HBox(10,search,find,clear),feedback,scroll,compose,send);
+        HBox navigation=new HBox(12,leave,refresh);
+        if(propose!=null && user.get()!=null && user.get().getRole()==UserRole.BUYER) {
+            Button formal=new Button("Make Formal Proposal");
+            formal.getStyleClass().add("btn-primary");
+            formal.setOnAction(e->propose.run());
+            navigation.getChildren().add(formal);
+        }
+        getChildren().addAll(navigation,heading,new HBox(10,search,find,clear),feedback,scroll,compose,send);
         updateControls();
         polling=new Timeline(new KeyFrame(Duration.seconds(4),e->{if(!loading&&!saving)load(false);}));polling.setCycleCount(Timeline.INDEFINITE);polling.play();
     }

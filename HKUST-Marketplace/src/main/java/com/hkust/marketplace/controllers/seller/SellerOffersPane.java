@@ -5,6 +5,7 @@ import com.hkust.marketplace.models.DealStatus;
 import com.hkust.marketplace.models.ListingType;
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.services.DealService;
+import com.hkust.marketplace.services.ChatService;
 import javafx.concurrent.Task;
 import javafx.event.ActionEvent;
 import javafx.geometry.Insets;
@@ -28,6 +29,7 @@ public class SellerOffersPane extends VBox {
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm:ss");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
     private final DealService service;
+    private final ChatService chats = new ChatService();
     private final Supplier<User> currentUser;
     private final Consumer<String> openListing;
     private final Consumer<String> openChat;
@@ -149,8 +151,17 @@ public class SellerOffersPane extends VBox {
         if (deal.getDealType() != ListingType.GIVEAWAY) {
             Button counter = button(deal.getStatus() == DealStatus.COUNTERED ? "Revise Counter" : "Counter", "btn-outline");
             counter.setOnAction(event -> counterDialog(deal).showAndWait().ifPresent(terms ->
-                    runAction(seller -> service.counterOffer(seller, deal.getId(), deal.getRowVersion(),
-                            terms.price(), terms.start(), terms.end()), "Counteroffer sent. Waiting for the buyer's response.")));
+                    runAction(seller -> {
+                        service.counterOffer(seller, deal.getId(), deal.getRowVersion(),
+                                terms.price(), terms.start(), terms.end());
+                        try {
+                            var thread = chats.openForDeal(seller, deal.getId());
+                            chats.sendProposal(seller, thread.id(), deal.getId());
+                        } catch (SQLException | IllegalArgumentException chatFailure) {
+                            // The counteroffer is already committed; its status remains visible to the buyer.
+                            System.err.println("Counteroffer chat message could not be sent: " + chatFailure.getMessage());
+                        }
+                    }, "Counteroffer sent. Waiting for the buyer's response.")));
             actions.getChildren().add(counter);
         }
         card.getChildren().add(actions);

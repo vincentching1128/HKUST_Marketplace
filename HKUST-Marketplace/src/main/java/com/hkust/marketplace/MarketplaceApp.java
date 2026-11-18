@@ -1,17 +1,20 @@
 package com.hkust.marketplace;
 
 import com.hkust.marketplace.utils.SceneManager;
+import com.hkust.marketplace.services.BuyerDealService;
 import javafx.application.Application;
 import javafx.stage.Stage;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * HKUST Marketplace - Main Application Entry Point
- * Frontend-only demo / skeleton for student development.
- *
- * This application provides a complete UI skeleton for the Buyer, Seller and Admin portals.
- * All data is in-memory / dummy. Backend integration points are marked with TODO comments.
+ * JavaFX entry point for the buyer, seller, and admin portals.
+ * Due borrowings are returned while the application is running.
  */
 public class MarketplaceApp extends Application {
+    private ScheduledExecutorService returns;
 
     @Override
     public void start(Stage primaryStage) {
@@ -21,6 +24,26 @@ public class MarketplaceApp extends Application {
         primaryStage.setMinWidth(1100);
         primaryStage.setMinHeight(700);
         primaryStage.show();
+        returns = Executors.newSingleThreadScheduledExecutor(task -> {
+            Thread thread = new Thread(task, "borrow-auto-return");
+            thread.setDaemon(true);
+            return thread;
+        });
+        BuyerDealService deals = new BuyerDealService();
+        AtomicBoolean returnCheckFailed = new AtomicBoolean();
+        returns.scheduleWithFixedDelay(() -> {
+            try {
+                deals.returnDueBorrowings();
+                returnCheckFailed.set(false);
+            } catch (Exception failure) {
+                if (!returnCheckFailed.getAndSet(true))
+                    System.err.println("Borrow auto-return check failed: " + failure.getMessage());
+            }
+        }, 5, 5, TimeUnit.SECONDS);
+    }
+
+    @Override public void stop() {
+        if (returns != null) returns.shutdownNow();
     }
 
     public static void main(String[] args) {
