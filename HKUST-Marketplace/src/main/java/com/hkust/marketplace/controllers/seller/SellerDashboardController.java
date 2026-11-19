@@ -10,6 +10,7 @@ import com.hkust.marketplace.services.NotificationService;
 import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.services.DealService;
 import com.hkust.marketplace.services.ChatService;
+import com.hkust.marketplace.services.ReviewService;
 import com.hkust.marketplace.controllers.ChatInboxPane;
 import com.hkust.marketplace.controllers.ChatPane;
 import javafx.concurrent.Task;
@@ -804,40 +805,14 @@ public class SellerDashboardController {
     @FXML
     private void showReviews() {
         setActive(btnReviews, "Reviews & Feedback");
-        contentPane.getChildren().clear();
-
-        VBox root = new VBox(12);
-        root.setPadding(new Insets(4));
-
-        User user = SessionManager.getCurrentUser();
-        List<Review> reviews = DummyDataService.getInstance()
-                .getReviewsForSeller(user != null ? user.getUsername() : "");
-
-        if (reviews.isEmpty()) {
-            root.getChildren().add(new Label("No reviews yet."));
-        } else {
-            for (Review r : reviews) {
-                VBox item = new VBox(6);
-                item.getStyleClass().add("card");
-                Label stars = new Label("★".repeat(r.getRating()) + "☆".repeat(5 - r.getRating()));
-                stars.setStyle("-fx-text-fill: #A68137; -fx-font-size: 16px;");
-                Label comment = new Label(r.getComment());
-                comment.setWrapText(true);
-                Label meta = new Label("by @" + r.getBuyerUsername() + " · " + r.getListingTitle());
-                meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 12px;");
-                HBox actions = new HBox(8);
-                Button reply = new Button("Reply");
-                reply.getStyleClass().addAll("btn-outline", "btn-sm");
-                reply.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION, "Reply sent to buyer (demo).").showAndWait());
-                Button flag = new Button("Flag");
-                flag.getStyleClass().addAll("btn-danger", "btn-sm");
-                flag.setOnAction(e -> new Alert(Alert.AlertType.INFORMATION, "Review flagged for admin (demo).").showAndWait());
-                actions.getChildren().addAll(reply, flag);
-                item.getChildren().addAll(stars, comment, meta, actions);
-                root.getChildren().add(item);
-            }
+        User seller = SessionManager.getCurrentUser();
+        if (seller == null) {
+            SceneManager.showSellerLogin();
+            return;
         }
-        contentPane.getChildren().add(new ScrollPane(root));
+        SellerReviewsPane reviews = new SellerReviewsPane(new ReviewService(), seller);
+        contentPane.getChildren().setAll(reviews);
+        reviews.refreshReviews();
     }
 
     @FXML
