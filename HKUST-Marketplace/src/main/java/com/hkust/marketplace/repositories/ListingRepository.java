@@ -421,40 +421,13 @@ public class ListingRepository {
      * @return false when no listing has that id
      */
     public boolean updateAsAdmin(String id, Listing listing) throws SQLException {
-        String sql = """
-                UPDATE listings SET itemName = ?, category = ?, listingType = ?, price = ?,
-                    description = ?, item_condition = ?, lending_duration = ?, lending_unit = ?,
-                    meetup_location = ?, listingStatus = 'PENDING_REVIEW',
-                    reviewed_at = NULL, rejection_reason = NULL, row_version = row_version + 1
-                WHERE id = ?
-                """;
         try (Connection conn = DatabaseManager.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                    stmt.setString(1, listing.getTitle());
-                    stmt.setString(2, listing.getCategory());
-                    stmt.setString(3, listing.getType().name());
-                    if (listing.getPrice() == null) stmt.setNull(4, Types.DECIMAL);
-                    else stmt.setBigDecimal(4, BigDecimal.valueOf(listing.getPrice()));
-                    stmt.setString(5, listing.getDescription());
-                    stmt.setString(6, listing.getCondition().toUpperCase(java.util.Locale.ROOT).replace(' ', '_'));
-                    if (listing.getLendingDuration() == null) stmt.setNull(7, Types.INTEGER);
-                    else stmt.setInt(7, listing.getLendingDuration());
-                    stmt.setString(8, listing.getLendingUnit() == null ? null : listing.getLendingUnit().name());
-                    stmt.setString(9, listing.getMeetupLocation());
-                    stmt.setString(10, id);
-                    if (stmt.executeUpdate() != 1) {
-                        conn.rollback();
-                        return false;
-                    }
+                if (!updateAsAdmin(conn, id, listing)) {
+                    conn.rollback();
+                    return false;
                 }
-                //replace the photo set in the same transaction, including when all were removed
-                try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM listing_photos WHERE listing_id = ?")) {
-                    stmt.setString(1, id);
-                    stmt.executeUpdate();
-                }
-                insertPhotos(conn, id, listing.getPhotos() == null ? List.of() : listing.getPhotos());
                 conn.commit();
                 return true;
             } catch (SQLException | RuntimeException failure) {
@@ -462,6 +435,45 @@ public class ListingRepository {
                 throw failure;
             }
         }
+    }
+
+    /**
+     * The same admin content update using the caller's transaction, so related writes
+     * (notifications, deal changes) commit or roll back together. The caller owns
+     * commit/rollback. Returns false without writing when no listing has that id.
+     */
+    public boolean updateAsAdmin(Connection conn, String id, Listing listing) throws SQLException {
+        String sql = """
+                UPDATE listings SET itemName = ?, category = ?, listingType = ?, price = ?,
+                    description = ?, item_condition = ?, lending_duration = ?, lending_unit = ?,
+                    meetup_location = ?, listingStatus = 'PENDING_REVIEW',
+                    reviewed_at = NULL, rejection_reason = NULL, row_version = row_version + 1
+                WHERE id = ?
+                """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, listing.getTitle());
+            stmt.setString(2, listing.getCategory());
+            stmt.setString(3, listing.getType().name());
+            if (listing.getPrice() == null) stmt.setNull(4, Types.DECIMAL);
+            else stmt.setBigDecimal(4, BigDecimal.valueOf(listing.getPrice()));
+            stmt.setString(5, listing.getDescription());
+            stmt.setString(6, listing.getCondition().toUpperCase(java.util.Locale.ROOT).replace(' ', '_'));
+            if (listing.getLendingDuration() == null) stmt.setNull(7, Types.INTEGER);
+            else stmt.setInt(7, listing.getLendingDuration());
+            stmt.setString(8, listing.getLendingUnit() == null ? null : listing.getLendingUnit().name());
+            stmt.setString(9, listing.getMeetupLocation());
+            stmt.setString(10, id);
+            if (stmt.executeUpdate() != 1) {
+                return false;
+            }
+        }
+        //replace the photo set in the same transaction, including when all were removed
+        try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM listing_photos WHERE listing_id = ?")) {
+            stmt.setString(1, id);
+            stmt.executeUpdate();
+        }
+        insertPhotos(conn, id, listing.getPhotos() == null ? List.of() : listing.getPhotos());
+        return true;
     }
 
     public void deleteOwned(String id, String seller) throws SQLException {

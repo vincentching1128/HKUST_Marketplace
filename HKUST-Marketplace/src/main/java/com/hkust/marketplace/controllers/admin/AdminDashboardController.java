@@ -621,12 +621,13 @@ public class AdminDashboardController {
                 Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
                         "Save changes to '" + existing.getTitle() + "'? The listing will return to Pending Review.",
                         ButtonType.OK, ButtonType.CANCEL);
+                confirmation.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
                 if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
             }
             submitBtn.setDisable(true);
             User admin = SessionManager.getCurrentUser();
             try {
-                if (editing) listingService.updateListingAsAdmin(admin, existing.getId(), listing);
+                if (editing) listingService.updateListingAsAdmin(admin,existing.getSellerUsername(), existing.getId(), listing);
                 else listingService.createListingAsAdmin(admin, sellerCombo.getValue().getUsername(), listing);
             } catch (IllegalArgumentException invalid) {
                 //keep the form values so the admin can fix the input

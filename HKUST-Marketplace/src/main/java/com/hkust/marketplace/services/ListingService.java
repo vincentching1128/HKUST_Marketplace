@@ -143,12 +143,47 @@ public class ListingService {
     }
 
     /** Admin action: edit any listing's content; it returns to Pending Review for re-approval. */
-    public void updateListingAsAdmin(User admin, String id, Listing changes) throws SQLException {
+    public void updateListingAsAdmin(User admin, String sellerUsername, String id, Listing changes) throws SQLException {
         requireActiveAdmin(admin);
         if (id == null || id.isBlank()) throw new IllegalArgumentException("A listing ID is required.");
+        if (sellerUsername == null || sellerUsername.isBlank()) {
+            throw new IllegalArgumentException("A seller username is required.");
+        }
         validateListing(changes);
-        if (!listingRepository.updateAsAdmin(id, changes)) {
-            throw new IllegalArgumentException("Listing not found.");
+        try (Connection conn = connections.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                //locks the owned row, validating the seller passed by the admin screen
+                Listing existing = listingRepository.findByIdAndSellerForUpdate(conn, id, sellerUsername);
+                if (existing == null) {
+                    throw new IllegalArgumentException("Listing not found or no longer owned by this seller.");
+                }
+                //locks/loads the open proposals; an accepted deal blocks the edit (seller rule)
+                List<Deal> affectedDeals = deals.findAffectedDeals(conn, id);
+                requireNoAcceptedDeals(affectedDeals);
+                //mirror the seller edit: cancel open proposals and tell each buyer
+                LocalDateTime now = LocalDateTime.now();
+                for (Deal deal : affectedDeals) {
+                    if (!deals.updateStatus(conn, deal.getId(), deal.getStatus(), deal.getRowVersion(),
+                            DealStatus.CANCELLED, now)) {
+                        throw new IllegalArgumentException("A proposal changed. Reload and try again.");
+                    }
+                    notificationRepository.create(conn, new Notification(deal.getBuyerUsername(),
+                            "Listing Changed",
+                            "An administrator edited listing '" + existing.getTitle()
+                                    + "'. Your proposal was cancelled.", "Listing"));
+                }
+                if (!listingRepository.updateAsAdmin(conn, id, changes)) {
+                    throw new IllegalArgumentException("Listing not found.");
+                }
+                //same pattern as the buyer offer flow: notify inside the same transaction.
+                //Use the title the seller/buyer knew before the edit, so the item is identifiable.
+                notifyListingEditedbyAdmin(conn, sellerUsername, existing.getTitle());
+                conn.commit();
+            } catch (SQLException | RuntimeException failure) {
+                try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+                throw failure;
+            }
         }
     }
 
@@ -200,6 +235,12 @@ public class ListingService {
                     "The listing " + title + " you made an offer on was removed by an administrator."
                             + " Reason: " + reason);
         }
+    }
+    private void notifyListingEditedbyAdmin(Connection conn, String sellerUsername, String oldListingTitle)
+            throws SQLException {
+        notificationRepository.create(conn, new Notification(sellerUsername, "Listing Edited",
+                "Your listing '" + oldListingTitle + "' was edited by an administrator and is awaiting review.",
+                "Listing"));
     }
 
     /** Persists one listing-related notification; notification failures never block an action. */
