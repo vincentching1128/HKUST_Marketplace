@@ -178,6 +178,30 @@ CREATE TABLE IF NOT EXISTS deals(
 
 );
 
+-- A deal supplies the buyer, seller, and listing for its review.
+-- The review service must check the buyer's identity and deal eligibility on submission.
+CREATE TABLE IF NOT EXISTS reviews (
+    id VARCHAR(50) PRIMARY KEY,
+    deal_id VARCHAR(50) NOT NULL,
+    rating TINYINT UNSIGNED NOT NULL,
+    comment TEXT NOT NULL,
+    seller_reply TEXT NULL,
+    flagged BOOLEAN NOT NULL DEFAULT FALSE,
+    hidden BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+
+    UNIQUE KEY uq_reviews_deal (deal_id),
+    INDEX idx_reviews_created_at (created_at),
+    INDEX idx_reviews_rating_created_at (rating, created_at),
+
+    CONSTRAINT chk_reviews_rating CHECK (rating BETWEEN 1 AND 5),
+    CONSTRAINT chk_reviews_comment CHECK (CHAR_LENGTH(TRIM(comment)) > 0),
+    CONSTRAINT chk_reviews_seller_reply
+        CHECK (seller_reply IS NULL OR CHAR_LENGTH(TRIM(seller_reply)) > 0),
+    CONSTRAINT fk_reviews_deal FOREIGN KEY (deal_id)
+        REFERENCES deals(id) ON UPDATE CASCADE ON DELETE CASCADE
+);
+
 -- One private conversation per listing and buyer/seller pair. Nullable references
 -- preserve history on account/listing deletion without granting a reused username access.
 CREATE TABLE IF NOT EXISTS chat_threads (
