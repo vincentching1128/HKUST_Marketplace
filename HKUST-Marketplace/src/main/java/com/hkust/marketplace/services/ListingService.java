@@ -137,13 +137,17 @@ public class ListingService {
     }
 
     /** Admin action: edit any listing's content; it returns to Pending Review for re-approval. */
-    public void updateListingAsAdmin(User admin, String id, Listing changes) throws SQLException {
+    public void updateListingAsAdmin(User admin, String sellerUsername, String id, Listing changes) throws SQLException {
         requireActiveAdmin(admin);
         if (id == null || id.isBlank()) throw new IllegalArgumentException("A listing ID is required.");
         validateListing(changes);
         if (!listingRepository.updateAsAdmin(id, changes)) {
             throw new IllegalArgumentException("Listing not found.");
         }
+        Listing listing = listingRepository.findByIdAndSeller(id, sellerUsername);
+        List<Deal> affectedDeals = deals.findAffectedDeals(id);
+        String title = listing == null ? "the listing" : "'" + listing.getTitle() + "'";
+        notifyListingEditedbyAdmin(sellerUsername, title, affectedDeals);
     }
 
     /** Admin removal entry point; returns whether an existing listing was marked Removed. */
@@ -193,6 +197,23 @@ public class ListingService {
             sendNotification(buyer, "Listing Removed",
                     "The listing " + title + " you made an offer on was removed by an administrator."
                             + " Reason: " + reason);
+        }
+    }
+    private void notifyListingEditedbyAdmin(String sellerUsername, String title,
+                                     List<Deal> affectedDeals) {
+        sendNotification(sellerUsername, "Listing Edited",
+                "Your listing " + title + " was edited by an administrator" );
+        Set<String> buyers = new java.util.LinkedHashSet<>();
+        for (Deal deal : affectedDeals) {
+            String buyer = deal.getBuyerUsername();
+            if (buyer != null && !buyer.isBlank() && !buyer.equalsIgnoreCase(sellerUsername)) {
+                buyers.add(buyer);
+            }
+        }
+        for (String buyer : buyers) {
+            sendNotification(buyer, "Listing Edited",
+                    "The listing " + title + " you made an offer on was edited by an administrator."
+                            );
         }
     }
 

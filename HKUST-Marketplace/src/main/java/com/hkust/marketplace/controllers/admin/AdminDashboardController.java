@@ -625,7 +625,7 @@ public class AdminDashboardController {
             submitBtn.setDisable(true);
             User admin = SessionManager.getCurrentUser();
             try {
-                if (editing) listingService.updateListingAsAdmin(admin, existing.getId(), listing);
+                if (editing) listingService.updateListingAsAdmin(admin,existing.getSellerUsername(), existing.getId(), listing);
                 else listingService.createListingAsAdmin(admin, sellerCombo.getValue().getUsername(), listing);
             } catch (IllegalArgumentException invalid) {
                 //keep the form values so the admin can fix the input
