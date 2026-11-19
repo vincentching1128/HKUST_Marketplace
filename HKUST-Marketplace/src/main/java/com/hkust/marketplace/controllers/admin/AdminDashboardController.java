@@ -620,6 +620,7 @@ public class AdminDashboardController {
                 Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
                         "Save changes to '" + existing.getTitle() + "'? The listing will return to Pending Review.",
                         ButtonType.OK, ButtonType.CANCEL);
+                confirmation.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
                 if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
             }
             submitBtn.setDisable(true);
