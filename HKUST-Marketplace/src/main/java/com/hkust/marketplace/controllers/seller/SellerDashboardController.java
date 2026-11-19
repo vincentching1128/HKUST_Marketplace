@@ -4,6 +4,7 @@ import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.controllers.NotificationBoard;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
+import com.hkust.marketplace.repositories.SellerStatsRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.NotificationService;
 import com.hkust.marketplace.services.ListingService;
@@ -39,6 +40,7 @@ import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Locale;
 
 public class SellerDashboardController {
     private final UserRepository userRepository = new UserRepository();
@@ -710,53 +712,79 @@ public class SellerDashboardController {
     @FXML
     private void showStats() {
         setActive(btnStats, "Seller Stats");
-        contentPane.getChildren().clear();
+        User seller = SessionManager.getCurrentUser();
+        if (seller == null) {
+            SceneManager.showSellerLogin();
+            return;
+        }
 
+        VBox loading = new VBox(12, new Label("Loading seller statistics..."), new ProgressIndicator());
+        loading.setAlignment(Pos.CENTER);
+        contentPane.getChildren().setAll(loading);
+        Task<SellerStatsRepository.Stats> task = new Task<>() {
+            @Override
+            protected SellerStatsRepository.Stats call() throws SQLException {
+                return listingService.getSellerStats(seller);
+            }
+        };
+        task.setOnSucceeded(event -> {
+            if (contentPane.getChildren().contains(loading) && SessionManager.getCurrentUser() == seller) {
+                renderStats(task.getValue());
+            }
+        });
+        task.setOnFailed(event -> {
+            if (contentPane.getChildren().contains(loading) && SessionManager.getCurrentUser() == seller) {
+                Button retry = new Button("Retry");
+                retry.getStyleClass().add("btn-outline");
+                retry.setOnAction(click -> showStats());
+                loading.getChildren().setAll(new Label("Unable to load seller statistics."), retry);
+            }
+        });
+        Thread worker = new Thread(task, "seller-stats-load");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void renderStats(SellerStatsRepository.Stats stats) {
         VBox root = new VBox(20);
         root.setPadding(new Insets(4));
 
-        User user = SessionManager.getCurrentUser();
-        List<Listing> myListings = DummyDataService.getInstance()
-                .getListingsBySeller(user != null ? user.getUsername() : "");
-
-        // Metric cards
         HBox metrics = new HBox(16);
         metrics.getChildren().addAll(
-                metricCard("Listings", String.valueOf(myListings.size()), "#003974"),
-                metricCard("Avg Rating", String.format("%.1f", user != null ? user.getAverageRating() : 0), "#A68137"),
-                metricCard("Reviews", String.valueOf(user != null ? user.getRatingCount() : 0), "#2e7d32"),
-                metricCard("Views (demo)", "128", "#1565c0")
+                metricCard("Listing Views", Long.toString(stats.views()), "#1565c0"),
+                metricCard("Offers Received", Long.toString(stats.offersReceived()), "#003974"),
+                metricCard("Completed Deals", Long.toString(stats.completedDeals()), "#2e7d32"),
+                metricCard("Average Rating", stats.averageRating() == null ? "No ratings"
+                        : String.format(Locale.ENGLISH, "%.1f / 5", stats.averageRating()), "#A68137")
         );
         root.getChildren().add(metrics);
 
-        // Bar chart
+        if (stats.listingsByCategory().isEmpty()) {
+            root.getChildren().add(new Label("No listings to chart."));
+        }
         CategoryAxis xAxis = new CategoryAxis();
         NumberAxis yAxis = new NumberAxis();
         BarChart<String, Number> barChart = new BarChart<>(xAxis, yAxis);
-        barChart.setTitle("Listings by Category (demo data)");
+        barChart.setTitle("Listings by Category");
         barChart.setLegendVisible(false);
         barChart.setPrefHeight(280);
         XYChart.Series<String, Number> series = new XYChart.Series<>();
-        series.getData().add(new XYChart.Data<>("Textbooks", 3));
-        series.getData().add(new XYChart.Data<>("Electronics", 5));
-        series.getData().add(new XYChart.Data<>("Furniture", 2));
-        series.getData().add(new XYChart.Data<>("Others", 1));
+        stats.listingsByCategory().forEach((category, count) ->
+                series.getData().add(new XYChart.Data<>(category, count)));
         barChart.getData().add(series);
 
-        // Pie chart
         PieChart pie = new PieChart();
         pie.setTitle("Listing Status Distribution");
         pie.setPrefHeight(280);
-        pie.getData().add(new PieChart.Data("Live", 4));
-        pie.getData().add(new PieChart.Data("Pending", 1));
-        pie.getData().add(new PieChart.Data("Sold", 2));
+        stats.listingsByStatus().forEach((status, count) ->
+                pie.getData().add(new PieChart.Data(status.name().replace('_', ' '), count)));
 
         HBox charts = new HBox(20, barChart, pie);
         root.getChildren().add(charts);
 
         ScrollPane scroll = new ScrollPane(root);
         scroll.setFitToWidth(true);
-        contentPane.getChildren().add(scroll);
+        contentPane.getChildren().setAll(scroll);
     }
 
     private VBox metricCard(String label, String value, String color) {

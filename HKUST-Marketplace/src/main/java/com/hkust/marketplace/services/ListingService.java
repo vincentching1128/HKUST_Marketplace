@@ -4,6 +4,7 @@ import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.ListingRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
+import com.hkust.marketplace.repositories.SellerStatsRepository;
 import com.hkust.marketplace.repositories.DealRepository;
 import com.hkust.marketplace.utils.DatabaseManager;
 
@@ -61,6 +62,11 @@ public class ListingService {
     public List<Listing> getMyListings(User user) throws SQLException {
         User current = requireActiveSeller(user);
         return listingRepository.findBySeller(current.getUsername());
+    }
+
+    public SellerStatsRepository.Stats getSellerStats(User seller) throws SQLException {
+        User current = requireActiveSeller(seller);
+        return new SellerStatsRepository().findBySeller(current.getUsername());
     }
 
     //check the database account each time in case its role or active status changed
