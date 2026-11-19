@@ -240,6 +240,7 @@ public class AdminDashboardController {
             if(!listingRepository.updateReview(target.getId(), ListingStatus.LIVE, null, target.getRowVersion())){
                 new Alert(Alert.AlertType.WARNING,
                         "This listing changed while you were reviewing it. The review queue will reload.").showAndWait();
+                return;
             }
             notifySellerOfApproval(target);
         }catch(SQLException ex){
