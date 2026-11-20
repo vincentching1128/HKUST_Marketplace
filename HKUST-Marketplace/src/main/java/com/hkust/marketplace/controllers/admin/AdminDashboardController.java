@@ -1170,7 +1170,9 @@ public class AdminDashboardController {
 
         // Suppress the combo listener while Reset restores the default selection.
         boolean[] suppressReload = {false};
-        Runnable reload = () -> {
+        // Holder so rows created inside the reload can request a reload with the same filters.
+        Runnable[] reload = new Runnable[1];
+        reload[0] = () -> {
             try {
                 Integer rating = scoreFilter.getSelectionModel().getSelectedIndex() <= 0
                         ? null : 6 - scoreFilter.getSelectionModel().getSelectedIndex();
@@ -1186,7 +1188,7 @@ public class AdminDashboardController {
                     return;
                 }
                 for (Review review : reviews) {
-                    results.getChildren().add(createRatingRow(review));
+                    results.getChildren().add(createRatingRow(review, reload[0]));
                 }
             } catch (IllegalArgumentException invalid) {
                 errorLabel.setText(invalid.getMessage());
@@ -1202,12 +1204,12 @@ public class AdminDashboardController {
             }
         };
 
-        searchBtn.setOnAction(event -> reload.run());
-        sellerFilter.setOnAction(event -> reload.run());
-        fromDate.setOnAction(event -> reload.run());
-        toDate.setOnAction(event -> reload.run());
+        searchBtn.setOnAction(event -> reload[0].run());
+        sellerFilter.setOnAction(event -> reload[0].run());
+        fromDate.setOnAction(event -> reload[0].run());
+        toDate.setOnAction(event -> reload[0].run());
         scoreFilter.setOnAction(event -> {
-            if (!suppressReload[0]) reload.run();
+            if (!suppressReload[0]) reload[0].run();
         });
         resetBtn.setOnAction(event -> {
             suppressReload[0] = true;
@@ -1216,14 +1218,14 @@ public class AdminDashboardController {
             fromDate.clear();
             toDate.clear();
             suppressReload[0] = false;
-            reload.run();
+            reload[0].run();
         });
 
         root.getChildren().addAll(filters, errorLabel, countLabel, results);
         ScrollPane scroll = new ScrollPane(root);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
-        reload.run();
+        reload[0].run();
     }
 
     /** Empty text means "no date bound"; otherwise ISO yyyy-MM-dd. */
@@ -1236,8 +1238,8 @@ public class AdminDashboardController {
         }
     }
 
-    /** One DB-backed review row; hiding is deferred, so the button is disabled for now. */
-    private VBox createRatingRow(Review review) {
+    /** One DB-backed review row; the Hide action persists hidden = TRUE and reloads. */
+    private VBox createRatingRow(Review review, Runnable reloadAction) {
         VBox row = new VBox(6);
         row.getStyleClass().add("card");
         row.setPadding(new Insets(12));
@@ -1250,8 +1252,13 @@ public class AdminDashboardController {
         HBox.setHgrow(spacer, Priority.ALWAYS);
         Button hide = new Button(review.isHidden() ? "Unhide" : "Hide");
         hide.getStyleClass().addAll("btn-outline", "btn-sm");
-        hide.setDisable(true);
-        hide.setTooltip(new Tooltip("Hiding reviews will be implemented later."));
+        hide.setDisable(review.isHidden());
+        hide.setTooltip(new Tooltip(review.isHidden()
+                ? "This review is hidden from sellers and buyers."
+                : "Hide this review from sellers and buyers."));
+        if (!review.isHidden()) {
+            hide.setOnAction(event -> hideReview(review, review.isHidden(),reloadAction));
+        }
         HBox titleRow = new HBox(10, stars, spacer, hide);
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
@@ -1269,6 +1276,23 @@ public class AdminDashboardController {
 
         row.getChildren().addAll(titleRow, comment, meta);
         return row;
+    }
+
+    /** Persists hidden = TRUE for one review, then reloads the list with the active filters. */
+    private void hideReview(Review review, Boolean hidden, Runnable reloadAction) {
+        try {
+            if (!reviewRepository.hide(review.getId(),hidden)) {
+                new Alert(Alert.AlertType.WARNING,
+                        "This review is no longer exists.").showAndWait();
+            }
+            reloadAction.run();
+        } catch (SQLException ex) {
+            LOGGER.log(Level.SEVERE, "Failed to hide or unhide review " + review.getId(), ex);
+            new Alert(Alert.AlertType.ERROR,
+                    "Unable to hide or unhide this review. Please try again.").showAndWait();
+        } catch (IllegalArgumentException invalid) {
+            new Alert(Alert.AlertType.WARNING, invalid.getMessage()).showAndWait();
+        }
     }
 
     @FXML

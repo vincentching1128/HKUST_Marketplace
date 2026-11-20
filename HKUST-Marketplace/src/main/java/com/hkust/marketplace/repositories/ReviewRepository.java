@@ -88,9 +88,10 @@ public class ReviewRepository {
         return reviews;
     }
 
+    /** Seller-facing list excludes reviews hidden by an administrator. */
     public List<Review> findBySeller(Connection connection, String seller) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(SELECT_REVIEWS
-                + "WHERE d.seller_username = ? ORDER BY r.created_at DESC, r.id")) {
+                + "WHERE d.seller_username = ? AND r.hidden = FALSE ORDER BY r.created_at DESC, r.id")) {
             statement.setString(1, seller);
             try (ResultSet rows = statement.executeQuery()) {
                 List<Review> reviews = new ArrayList<>();
@@ -146,6 +147,25 @@ public class ReviewRepository {
         try (PreparedStatement statement = connection.prepareStatement("UPDATE reviews SET flagged = TRUE WHERE id = ?")) {
             statement.setString(1, reviewId);
             statement.executeUpdate();
+        }
+    }
+
+    /**
+     * Admin moderation: marks one review as hidden (sets {@code hidden = TRUE}).
+     *
+     * @return true when an existing visible review was hidden; false when it was already
+     *         hidden or no longer exists
+     */
+    public boolean hide(String reviewId,Boolean hidden) throws SQLException {
+        if (reviewId == null || reviewId.isBlank()) {
+            throw new IllegalArgumentException("A review ID is required.");
+        }
+        String sql = "UPDATE reviews SET hidden = ? WHERE id = ?";
+        try (Connection connection = DatabaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setBoolean(1,!hidden);
+            statement.setString(2, reviewId);
+            return statement.executeUpdate() > 0;
         }
     }
 
