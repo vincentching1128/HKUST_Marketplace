@@ -40,6 +40,15 @@ public class ReviewRepository {
      * collation) plus an inclusive created-date range. Null keyword/dates are ignored.
      */
     public List<Review> searchReviews(String keyword, LocalDate from, LocalDate to) throws SQLException {
+        return searchReviews(keyword, null, from, to);
+    }
+
+    /** Same search with an optional exact rating (1..5) filter, for the ratings screen. */
+    public List<Review> searchReviews(String keyword, Integer rating, LocalDate from, LocalDate to)
+            throws SQLException {
+        if (rating != null && (rating < 1 || rating > 5)) {
+            throw new IllegalArgumentException("Rating must be between 1 and 5.");
+        }
         if (from != null && to != null && from.isAfter(to)) {
             throw new IllegalArgumentException("Start date must not be after end date.");
         }
@@ -48,6 +57,10 @@ public class ReviewRepository {
         if (keyword != null && !keyword.isBlank()) {
             where.append(" AND LOCATE(?, d.seller_username) > 0");
             parameters.add(keyword.strip());
+        }
+        if (rating != null) {
+            where.append(" AND r.rating = ?");
+            parameters.add(rating);
         }
         if (from != null) {
             where.append(" AND r.created_at >= ?");
