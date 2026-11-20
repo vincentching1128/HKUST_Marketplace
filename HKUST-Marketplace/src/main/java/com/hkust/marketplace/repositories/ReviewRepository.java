@@ -1,11 +1,14 @@
 package com.hkust.marketplace.repositories;
 
 import com.hkust.marketplace.models.Review;
+import com.hkust.marketplace.utils.DatabaseManager;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -17,6 +20,60 @@ public class ReviewRepository {
             JOIN deals d ON d.id = r.deal_id
             JOIN listings l ON l.id = d.listing_id
             """;
+    private static final String NEWEST_FIRST = " ORDER BY r.created_at DESC, r.id";
+
+    /** All reviews, newest first (includes hidden/flagged rows for the admin moderation screen). */
+    public List<Review> findAll() throws SQLException {
+        return query("", List.of());
+    }
+
+    /** Reviews with exactly the supplied rating; ratings are constrained to 1..5. */
+    public List<Review> findByRating(int rating) throws SQLException {
+        if (rating < 1 || rating > 5) {
+            throw new IllegalArgumentException("Rating must be between 1 and 5.");
+        }
+        return query("WHERE r.rating = ?" + NEWEST_FIRST, List.of(rating));
+    }
+
+    /**
+     * Admin search: literal keyword in the seller username (case follows the database
+     * collation) plus an inclusive created-date range. Null keyword/dates are ignored.
+     */
+    public List<Review> searchReviews(String keyword, LocalDate from, LocalDate to) throws SQLException {
+        if (from != null && to != null && from.isAfter(to)) {
+            throw new IllegalArgumentException("Start date must not be after end date.");
+        }
+        StringBuilder where = new StringBuilder("WHERE 1 = 1");
+        List<Object> parameters = new ArrayList<>();
+        if (keyword != null && !keyword.isBlank()) {
+            where.append(" AND LOCATE(?, d.seller_username) > 0");
+            parameters.add(keyword.strip());
+        }
+        if (from != null) {
+            where.append(" AND r.created_at >= ?");
+            parameters.add(Timestamp.valueOf(from.atStartOfDay()));
+        }
+        if (to != null) {
+            where.append(" AND DATE(r.created_at) <= ?");
+            parameters.add(java.sql.Date.valueOf(to));
+        }
+        where.append(NEWEST_FIRST);
+        return query(where.toString(), parameters);
+    }
+
+    private List<Review> query(String suffix, List<?> parameters) throws SQLException {
+        List<Review> reviews = new ArrayList<>();
+        try (Connection connection = DatabaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(SELECT_REVIEWS + suffix)) {
+            for (int i = 0; i < parameters.size(); i++) {
+                statement.setObject(i + 1, parameters.get(i));
+            }
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) reviews.add(map(rows));
+            }
+        }
+        return reviews;
+    }
 
     public List<Review> findBySeller(Connection connection, String seller) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(SELECT_REVIEWS
