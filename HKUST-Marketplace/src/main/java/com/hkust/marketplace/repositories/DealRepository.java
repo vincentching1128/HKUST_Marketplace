@@ -96,7 +96,7 @@ public class DealRepository {
         }
         List<Deal> affected = new ArrayList<>();
         String sql = SELECT_DEALS + "WHERE d.listing_id = ? AND d.status IN " + OPEN_STATUSES
-                + NEWEST_FIRST + " FOR UPDATE";
+                + " AND d.deleted < 2" + NEWEST_FIRST + " FOR UPDATE";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, listingId);
             try (ResultSet rows = statement.executeQuery()) {
@@ -217,9 +217,13 @@ public class DealRepository {
     }
 
     private List<Deal> query(String where, List<?> parameters) throws SQLException {
+        //deleted = 2 means both participants are gone: hide these records from default queries
+        String filter = where == null || where.isBlank()
+                ? "WHERE d.deleted < 2"
+                : where + " AND d.deleted < 2";
         List<Deal> deals = new ArrayList<>();
         try (Connection connection = connections.getConnection();
-             PreparedStatement statement = connection.prepareStatement(SELECT_DEALS + where + NEWEST_FIRST)) {
+             PreparedStatement statement = connection.prepareStatement(SELECT_DEALS + filter + NEWEST_FIRST)) {
             for (int i = 0; i < parameters.size(); i++) statement.setObject(i + 1, parameters.get(i));
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) deals.add(mapRow(rows));
@@ -312,7 +316,8 @@ public class DealRepository {
         requireTransaction(connection);
         requireIdentifier(id, "Deal ID");
         String listingId;
-        try (PreparedStatement statement = connection.prepareStatement("SELECT listing_id FROM deals WHERE id = ?")) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT listing_id FROM deals WHERE id = ? AND deleted < 2")) {
             statement.setString(1, id);
             try (ResultSet rows = statement.executeQuery()) {
                 if (!rows.next()) return Optional.empty();
@@ -325,7 +330,8 @@ public class DealRepository {
                 if (!rows.next()) return Optional.empty();
             }
         }
-        try (PreparedStatement statement = connection.prepareStatement(SELECT_DEALS + "WHERE d.id = ? FOR UPDATE")) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                SELECT_DEALS + "WHERE d.id = ? AND d.deleted < 2 FOR UPDATE")) {
             statement.setString(1, id);
             try (ResultSet rows = statement.executeQuery()) {
                 return rows.next() ? Optional.of(mapRow(rows)) : Optional.empty();
@@ -383,7 +389,7 @@ public class DealRepository {
                 + (acceptCounter ? ", offeredPrice = COALESCE(counterOfferPrice, offeredPrice), "
                     + "borrowStartDate = COALESCE(counterBorrowStart, borrowStartDate), "
                     + "borrowDueDate = COALESCE(counterDueEnd, borrowDueDate)" : "")
-                + " WHERE id = ? AND status = ? AND row_version = ?";
+                + " WHERE id = ? AND status = ? AND row_version = ? AND deleted < 2";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, next.name());
             statement.setTimestamp(2, next == DealStatus.COMPLETED ? dateTimestamp(occurredAt) : null);
@@ -424,7 +430,7 @@ public class DealRepository {
         try (PreparedStatement statement = connection.prepareStatement("""
                 UPDATE deals SET status = 'COUNTERED', counterOfferPrice = ?,
                     counterBorrowStart = ?, counterDueEnd = ?, row_version = row_version + 1
-                WHERE id = ? AND status = ? AND row_version = ?
+                WHERE id = ? AND status = ? AND row_version = ? AND deleted < 2
                 """)) {
             statement.setBigDecimal(1, price);
             statement.setTimestamp(2, dateTimestamp(counterStart));
@@ -451,7 +457,8 @@ public class DealRepository {
 
     private void requireNoAcceptedDeal(Connection connection, String listingId, String excludingId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT id FROM deals WHERE listing_id = ? AND status = 'ACCEPTED' AND id <> ? FOR UPDATE")) {
+                "SELECT id FROM deals WHERE listing_id = ? AND status = 'ACCEPTED'"
+                        + " AND id <> ? AND deleted < 2 FOR UPDATE")) {
             statement.setString(1, listingId);
             statement.setString(2, excludingId);
             try (ResultSet rows = statement.executeQuery()) {
