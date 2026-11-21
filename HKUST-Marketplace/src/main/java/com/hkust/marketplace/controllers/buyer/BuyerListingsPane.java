@@ -1,5 +1,6 @@
 package com.hkust.marketplace.controllers.buyer;
 
+import com.hkust.marketplace.controllers.SellerProfilePane;
 import com.hkust.marketplace.models.Listing;
 import com.hkust.marketplace.models.ListingStatus;
 import com.hkust.marketplace.models.ListingType;
@@ -249,7 +250,6 @@ public class BuyerListingsPane extends VBox {
         details.getChildren().addAll(title, gallery(listing.getPhotos()), statusLabel(listing));
         String[][] fields = {
                 {"Seller", sellerName(listing)}, {"Seller Username", listing.getSellerUsername()},
-                {"Seller Rating", "Ratings are not available yet."},
                 {"Category", listing.getCategory()}, {"Condition", listing.getCondition()},
                 {"Listing Type", listing.getTypeDisplay()}, {"Terms", terms(listing)},
                 {"Meet-up Location", listing.getMeetupLocation()}, {"Posted", postedDate(listing)},
@@ -277,6 +277,7 @@ public class BuyerListingsPane extends VBox {
         Button report = button("Report Listing", "btn-danger", () -> reportListing(listing));
         details.getChildren().addAll(new FlowPane(10, 10, action, chat, report), unavailable,
                 button("Refresh Details", "btn-outline", () -> showListingDetails(listing.getId(), detailBack)));
+        details.getChildren().add(SellerProfilePane.listingFeedback(listing.getSellerUsername()));
         return details;
     }
 

@@ -44,6 +44,10 @@ public class BuyerDealService {
         this.clock = Objects.requireNonNull(clock);
     }
 
+    public List<DealHistoryEntry> getHistory(User buyer) throws SQLException {
+        return deals.findBuyerHistory(requireBuyer(null, buyer).getUsername());
+    }
+
     public List<Deal> getMyDeals(User buyer) throws SQLException {
         User current = requireBuyer(null, buyer);
         return deals.findByBuyer(current.getUsername());

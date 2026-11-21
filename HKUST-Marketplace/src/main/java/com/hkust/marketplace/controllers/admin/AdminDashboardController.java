@@ -2,6 +2,7 @@ package com.hkust.marketplace.controllers.admin;
 
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.controllers.NotificationBoard;
+import com.hkust.marketplace.controllers.SellerProfilePane;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.ListingRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
@@ -224,7 +225,7 @@ public class AdminDashboardController {
         });
 
         actions.getChildren().addAll(approve, reject);
-        card.getChildren().addAll(header, details, photosBox, actions);
+        card.getChildren().addAll(header, details, SellerProfilePane.profileButton(l.getSellerUsername()), photosBox, actions);
         return card;
     }
 
@@ -374,7 +375,7 @@ public class AdminDashboardController {
                 });
             });
 
-            row.getChildren().addAll(info, edit, remove);
+            row.getChildren().addAll(info, SellerProfilePane.profileButton(l.getSellerUsername()), edit, remove);
             root.getChildren().add(row);
         }
         ScrollPane scroll = new ScrollPane(root);
@@ -786,7 +787,9 @@ public class AdminDashboardController {
                 });
             });
 
-            row.getChildren().addAll(info, edit, toggle, delete);
+            row.getChildren().add(info);
+            if (u.getRole() == UserRole.SELLER) row.getChildren().add(SellerProfilePane.profileButton(u.getUsername()));
+            row.getChildren().addAll(edit, toggle, delete);
             root.getChildren().add(row);
         }
         ScrollPane scroll = new ScrollPane(root);

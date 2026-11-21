@@ -26,7 +26,6 @@ import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
 import java.sql.SQLException;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 
@@ -93,7 +92,7 @@ public class BuyerDashboardController {
     private void showMyDeals() {
         setActive(btnDeals, "My Deals");
         dealsPane = new BuyerDealsPane(buyerDeals, SessionManager::getCurrentUser,
-                this::showDealListing, this::openChatForDeal);
+                this::showDealListing, this::openChatForDeal, this::openHistory);
         contentPane.getChildren().setAll(dealsPane);
         dealsPane.refresh();
     }
@@ -179,42 +178,12 @@ public class BuyerDashboardController {
 
     @FXML
     private void showHistory() {
+        openHistory(null);
+    }
+
+    private void openHistory(String reviewDealId) {
         setActive(btnHistory, "Deal History");
-        contentPane.getChildren().clear();
-
-        VBox root = new VBox(16);
-        root.setPadding(new Insets(4));
-
-        HBox filters = new HBox(12);
-        filters.setAlignment(Pos.CENTER_LEFT);
-        DatePicker from = new DatePicker();
-        from.setPromptText("From");
-        DatePicker to = new DatePicker();
-        to.setPromptText("To");
-        TextField search = new TextField();
-        search.setPromptText("Search by title / seller...");
-        filters.getChildren().addAll(new Label("Date range:"), from, new Label("–"), to, search);
-        root.getChildren().add(filters);
-
-        TableView<String[]> table = new TableView<>();
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<String[], String> c1 = new TableColumn<>("Item Title");
-        c1.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue()[0]));
-        TableColumn<String[], String> c2 = new TableColumn<>("Seller");
-        c2.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue()[1]));
-        TableColumn<String[], String> c3 = new TableColumn<>("Deal Date");
-        c3.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue()[2]));
-        TableColumn<String[], String> c4 = new TableColumn<>("Type");
-        c4.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue()[3]));
-        TableColumn<String[], String> c5 = new TableColumn<>("Outcome");
-        c5.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue()[4]));
-        table.getColumns().addAll(c1, c2, c3, c4, c5);
-        table.setItems(FXCollections.observableArrayList(
-                new String[]{"Old Chemistry Book", "Charlie Lee", "2025-11-12", "Bought", "Completed"},
-                new String[]{"USB Hub", "Diana Ng", "2025-10-03", "Received", "Completed"}
-        ));
-        root.getChildren().add(table);
-        contentPane.getChildren().add(root);
+        contentPane.getChildren().setAll(new BuyerHistoryPane(SessionManager.getCurrentUser(), buyerDeals, reviewDealId));
     }
 
     @FXML

@@ -1,6 +1,7 @@
 package com.hkust.marketplace.repositories;
 
 import com.hkust.marketplace.models.Deal;
+import com.hkust.marketplace.models.DealHistoryEntry;
 import com.hkust.marketplace.models.DealStatus;
 import com.hkust.marketplace.models.ListingType;
 import com.hkust.marketplace.models.UserRole;
@@ -54,6 +55,34 @@ public class DealRepository {
     public List<Deal> findByBuyer(String username) throws SQLException {
         requireIdentifier(username, "Buyer username");
         return query("WHERE d.buyer_username = ?", List.of(username));
+    }
+
+    public List<DealHistoryEntry> findBuyerHistory(String username) throws SQLException {
+        String sql = """
+                SELECT d.id, l.itemName, l.category, d.seller_username, u.full_name,
+                       COALESCE(d.returnedDate, d.completedDate) AS closed_at, d.dealType, d.status,
+                       r.rating, r.comment, r.seller_reply, r.hidden
+                FROM deals d JOIN listings l ON l.id = d.listing_id
+                LEFT JOIN users u ON u.username = d.seller_username
+                LEFT JOIN reviews r ON r.deal_id = d.id
+                WHERE d.buyer_username = ? AND d.status IN ('COMPLETED','RETURNED')
+                ORDER BY closed_at DESC, d.id
+                """;
+        try (Connection connection = connections.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, username);
+            try (ResultSet rows = statement.executeQuery()) {
+                List<DealHistoryEntry> history = new ArrayList<>();
+                while (rows.next()) {
+                    history.add(new DealHistoryEntry(rows.getString("id"), rows.getString("itemName"),
+                            rows.getString("category"), rows.getString("seller_username"), rows.getString("full_name"),
+                            readDateTime(rows, "closed_at"), rows.getString("dealType"),
+                            DealStatus.valueOf(rows.getString("status")), rows.getObject("rating", Integer.class),
+                            rows.getString("comment"), rows.getString("seller_reply"), rows.getBoolean("hidden")));
+                }
+                return history;
+            }
+        }
     }
 
     public List<Deal> findBySeller(String username) throws SQLException {

@@ -15,6 +15,7 @@ import com.hkust.marketplace.utils.DatabaseManager;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.OptionalDouble;
 import java.util.UUID;
 
 public class ReviewService {
@@ -27,8 +28,32 @@ public class ReviewService {
 
     public List<Review> getSellerReviews(User seller) throws SQLException {
         try (Connection connection = DatabaseManager.getConnection()) {
+            connection.setAutoCommit(false);
             User current = requireRole(connection, seller, UserRole.SELLER);
-            return reviews.findBySeller(connection, current.getUsername());
+            List<Review> result = reviews.findBySeller(connection, current.getUsername());
+            connection.commit();
+            return result;
+        }
+    }
+
+    /** Only public profile fields and visible reviews leave this service. */
+    public record SellerProfile(String name, String username, String bio, String meetup, List<Review> reviews) {
+        public OptionalDouble average() {
+            return reviews.stream().mapToInt(Review::getRating).average();
+        }
+    }
+
+    public SellerProfile getPublicProfile(String username) throws SQLException {
+        try (Connection connection = DatabaseManager.getConnection()) {
+            connection.setAutoCommit(false);
+            User seller = users.findByUsername(connection, username);
+            if (seller == null || seller.getRole() != UserRole.SELLER) {
+                throw new IllegalArgumentException("This seller profile is unavailable.");
+            }
+            SellerProfile result = new SellerProfile(seller.getFullName(), seller.getUsername(), seller.getBio(),
+                    seller.getPreferredMeetup(), List.copyOf(reviews.findBySeller(connection, seller.getUsername())));
+            connection.commit();
+            return result;
         }
     }
 
@@ -43,6 +68,7 @@ public class ReviewService {
                     || (deal.getStatus() != DealStatus.COMPLETED && deal.getStatus() != DealStatus.RETURNED)) {
                 throw new IllegalArgumentException("You can only review one of your finished deals.");
             }
+            if (deal.getSellerUsername() == null) throw new IllegalArgumentException("The seller account was deleted.");
             if (reviews.existsForDealForUpdate(connection, dealId)) {
                 throw new IllegalArgumentException("You already reviewed this deal.");
             }
