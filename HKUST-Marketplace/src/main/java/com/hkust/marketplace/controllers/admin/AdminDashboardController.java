@@ -6,6 +6,7 @@ import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.ListingRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.repositories.DealRepository;
+import com.hkust.marketplace.repositories.ReviewRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.NotificationService;
 import com.hkust.marketplace.services.ListingService;
@@ -29,8 +30,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.sql.SQLException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -53,6 +56,7 @@ public class AdminDashboardController {
     private final ListingService listingService = new ListingService();
     private final NotificationRepository notificationRepository = new NotificationRepository();
     private final DealRepository dealRepository = new DealRepository();
+    private final ReviewRepository reviewRepository = new ReviewRepository();
 
     @FXML
     public void initialize() {
@@ -1123,43 +1127,172 @@ public class AdminDashboardController {
         VBox root = new VBox(12);
         root.setPadding(new Insets(4));
 
-        HBox filters = new HBox(10);
-        TextField userFilter = new TextField();
-        userFilter.setPromptText("Filter by seller...");
+        TextField sellerFilter = new TextField();
+        sellerFilter.setPromptText("Search seller");
+        sellerFilter.setPrefWidth(200);
+
         ComboBox<String> scoreFilter = new ComboBox<>(FXCollections.observableArrayList(
                 "All scores", "5 stars", "4 stars", "3 stars", "2 stars", "1 star"));
         scoreFilter.getSelectionModel().selectFirst();
-        filters.getChildren().addAll(userFilter, scoreFilter);
-        root.getChildren().add(filters);
 
-        for (Review r : DummyDataService.getInstance().getAllReviews()) {
-            HBox row = new HBox(12);
-            row.getStyleClass().add("card");
-            row.setAlignment(Pos.CENTER_LEFT);
-            row.setPadding(new Insets(12));
+        TextField fromDate = new TextField();
+        fromDate.setPromptText("From (yyyy-MM-dd)");
+        fromDate.setPrefWidth(150);
+        TextField toDate = new TextField();
+        toDate.setPromptText("To (yyyy-MM-dd)");
+        toDate.setPrefWidth(150);
 
-            VBox info = new VBox(4);
-            HBox.setHgrow(info, Priority.ALWAYS);
-            Label stars = new Label("★".repeat(r.getRating()) + "☆".repeat(5 - r.getRating()) +
-                    "  @" + r.getSellerUsername() + " by @" + r.getBuyerUsername());
-            stars.setStyle("-fx-font-weight: bold;");
-            Label comment = new Label(r.getComment());
-            comment.setWrapText(true);
-            comment.setStyle("-fx-text-fill: #5a5a7a;");
-            info.getChildren().addAll(stars, comment);
+        Button searchBtn = new Button("Search");
+        searchBtn.getStyleClass().addAll("btn-primary", "btn-sm");
+        Button resetBtn = new Button("Reset");
+        resetBtn.getStyleClass().addAll("btn-outline", "btn-sm");
 
-            Button hide = new Button(r.isHidden() ? "Unhide" : "Hide");
-            hide.getStyleClass().addAll("btn-outline", "btn-sm");
-            hide.setOnAction(e -> {
-                r.setHidden(!r.isHidden());
-                showRatings();
-            });
-            row.getChildren().addAll(info, hide);
-            root.getChildren().add(row);
-        }
+        HBox primaryFilters = new HBox(10, new Label("Seller:"), sellerFilter,
+                new Label("Rating:"), scoreFilter);
+        primaryFilters.setAlignment(Pos.CENTER_LEFT);
+
+        HBox dateFilters = new HBox(10, new Label("Created:"), fromDate, new Label("to"), toDate,
+                searchBtn, resetBtn);
+        dateFilters.setAlignment(Pos.CENTER_LEFT);
+
+        VBox filters = new VBox(8, primaryFilters, dateFilters);
+        filters.setPadding(new Insets(0, 0, 4, 0));
+
+        Label countLabel = new Label();
+        countLabel.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
+        Label errorLabel = new Label();
+        errorLabel.setStyle("-fx-text-fill: #c62828; -fx-font-size: 13px;");
+        errorLabel.setWrapText(true);
+        errorLabel.setVisible(false);
+        errorLabel.managedProperty().bind(errorLabel.visibleProperty());
+
+        VBox results = new VBox(10);
+
+        // Suppress the combo listener while Reset restores the default selection.
+        boolean[] suppressReload = {false};
+        // Holder so rows created inside the reload can request a reload with the same filters.
+        Runnable[] reload = new Runnable[1];
+        reload[0] = () -> {
+            try {
+                Integer rating = scoreFilter.getSelectionModel().getSelectedIndex() <= 0
+                        ? null : 6 - scoreFilter.getSelectionModel().getSelectedIndex();
+                LocalDate from = parseFilterDate(fromDate.getText(), "From");
+                LocalDate to = parseFilterDate(toDate.getText(), "To");
+                List<Review> reviews = reviewRepository.searchReviews(
+                        sellerFilter.getText(), rating, from, to);
+                errorLabel.setVisible(false);
+                countLabel.setText(reviews.size() + (reviews.size() == 1 ? " review" : " reviews"));
+                results.getChildren().clear();
+                if (reviews.isEmpty()) {
+                    results.getChildren().add(new Label("No reviews match these filters."));
+                    return;
+                }
+                for (Review review : reviews) {
+                    results.getChildren().add(createRatingRow(review, reload[0]));
+                }
+            } catch (IllegalArgumentException invalid) {
+                errorLabel.setText(invalid.getMessage());
+                errorLabel.setVisible(true);
+                countLabel.setText("");
+                results.getChildren().setAll(new Label("Correct the filters to view reviews."));
+            } catch (SQLException ex) {
+                LOGGER.log(Level.SEVERE, "Failed to load reviews from the database.", ex);
+                errorLabel.setText("Unable to load reviews. Please try again.");
+                errorLabel.setVisible(true);
+                countLabel.setText("");
+                results.getChildren().setAll(new Label("Review list unavailable."));
+            }
+        };
+
+        searchBtn.setOnAction(event -> reload[0].run());
+        sellerFilter.setOnAction(event -> reload[0].run());
+        fromDate.setOnAction(event -> reload[0].run());
+        toDate.setOnAction(event -> reload[0].run());
+        scoreFilter.setOnAction(event -> {
+            if (!suppressReload[0]) reload[0].run();
+        });
+        resetBtn.setOnAction(event -> {
+            suppressReload[0] = true;
+            sellerFilter.clear();
+            scoreFilter.getSelectionModel().selectFirst();
+            fromDate.clear();
+            toDate.clear();
+            suppressReload[0] = false;
+            reload[0].run();
+        });
+
+        root.getChildren().addAll(filters, errorLabel, countLabel, results);
         ScrollPane scroll = new ScrollPane(root);
         scroll.setFitToWidth(true);
         contentPane.getChildren().add(scroll);
+        reload[0].run();
+    }
+
+    /** Empty text means "no date bound"; otherwise ISO yyyy-MM-dd. */
+    private LocalDate parseFilterDate(String text, String label) {
+        if (text == null || text.isBlank()) return null;
+        try {
+            return LocalDate.parse(text.strip());
+        } catch (DateTimeParseException invalid) {
+            throw new IllegalArgumentException(label + " date must use yyyy-MM-dd.");
+        }
+    }
+
+    /** One DB-backed review row; the Hide action persists hidden = TRUE and reloads. */
+    private VBox createRatingRow(Review review, Runnable reloadAction) {
+        VBox row = new VBox(6);
+        row.getStyleClass().add("card");
+        row.setPadding(new Insets(12));
+
+        Label stars = new Label("★".repeat(review.getRating()) + "☆".repeat(5 - review.getRating())
+                + "  @" + review.getSellerUsername() + " by @" + review.getBuyerUsername()
+                + (review.isHidden() ? "  (hidden)" : ""));
+        stars.setStyle("-fx-font-weight: bold;");
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        Button hide = new Button(review.isHidden() ? "Unhide" : "Hide");
+        hide.getStyleClass().addAll("btn-outline", "btn-sm");
+        hide.setDisable(review.isHidden());
+        hide.setTooltip(new Tooltip(review.isHidden()
+                ? "This review is hidden from sellers and buyers."
+                : "Hide this review from sellers and buyers."));
+        if (!review.isHidden()) {
+            hide.setOnAction(event -> hideReview(review, review.isHidden(),reloadAction));
+        }
+        HBox titleRow = new HBox(10, stars, spacer, hide);
+        titleRow.setAlignment(Pos.CENTER_LEFT);
+
+        Label comment = new Label(review.getComment());
+        comment.setWrapText(true);
+        comment.setStyle("-fx-text-fill: #5a5a7a;");
+
+        String listingTitle = review.getListingTitle() == null || review.getListingTitle().isBlank()
+                ? "unknown listing" : review.getListingTitle();
+        Label meta = new Label("Listing: " + listingTitle + " · "
+                + (review.getCreatedAt() == null ? "unknown date"
+                : review.getCreatedAt().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.ENGLISH)))
+                + (review.isFlagged() ? " · flagged" : ""));
+        meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
+
+        row.getChildren().addAll(titleRow, comment, meta);
+        return row;
+    }
+
+    /** Persists hidden = TRUE for one review, then reloads the list with the active filters. */
+    private void hideReview(Review review, Boolean hidden, Runnable reloadAction) {
+        try {
+            if (!reviewRepository.hide(review.getId(),hidden)) {
+                new Alert(Alert.AlertType.WARNING,
+                        "This review is no longer exists.").showAndWait();
+            }
+            reloadAction.run();
+        } catch (SQLException ex) {
+            LOGGER.log(Level.SEVERE, "Failed to hide or unhide review " + review.getId(), ex);
+            new Alert(Alert.AlertType.ERROR,
+                    "Unable to hide or unhide this review. Please try again.").showAndWait();
+        } catch (IllegalArgumentException invalid) {
+            new Alert(Alert.AlertType.WARNING, invalid.getMessage()).showAndWait();
+        }
     }
 
     @FXML
