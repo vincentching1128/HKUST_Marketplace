@@ -16,6 +16,7 @@ public class ChatRepository {
                 SELECT DISTINCT d.listing_id,d.buyer_username,d.seller_username,d.dealType,l.itemName
                 FROM deals d JOIN listings l ON l.id=d.listing_id
                 WHERE d.status IN ('ACCEPTED','COMPLETED','RETURNED') AND
+                d.deleted < 2 AND d.buyer_username IS NOT NULL AND d.seller_username IS NOT NULL AND
                 """+owner+" = ? AND NOT EXISTS (SELECT 1 FROM chat_threads t WHERE t.listing_id=d.listing_id "
                 +"AND t.buyer_username=d.buyer_username AND t.seller_username=d.seller_username)")) {
             stmt.setString(1,username);
@@ -47,7 +48,7 @@ public class ChatRepository {
         List<ChatThread> threads = new ArrayList<>();
         try (PreparedStatement stmt = conn.prepareStatement("""
                 SELECT t.* FROM chat_threads t
-                WHERE t.buyer_username = ? OR t.seller_username = ?
+                WHERE (t.buyer_username = ? OR t.seller_username = ?) AND t.deleted < 2
                 ORDER BY COALESCE((SELECT MAX(m.id) FROM chat_messages m WHERE m.thread_id=t.id),0) DESC,
                     t.created_at DESC, t.id ASC
                 """)) {
@@ -58,7 +59,8 @@ public class ChatRepository {
     }
 
     public ChatThread findThread(Connection conn, String id, boolean lock) throws SQLException {
-        try (PreparedStatement stmt = conn.prepareStatement("SELECT * FROM chat_threads WHERE id = ?" + (lock ? " FOR UPDATE" : ""))) {
+        try (PreparedStatement stmt = conn.prepareStatement(
+                "SELECT * FROM chat_threads WHERE id = ? AND deleted < 2" + (lock ? " FOR UPDATE" : ""))) {
             stmt.setString(1, id);
             try (ResultSet rows = stmt.executeQuery()) { return rows.next() ? thread(rows) : null; }
         }
@@ -75,7 +77,8 @@ public class ChatRepository {
             stmt.setString(7, deal.getBuyerUsername()); stmt.setString(8, deal.getSellerUsername()); stmt.executeUpdate();
         }
         try (PreparedStatement stmt = conn.prepareStatement("""
-                SELECT * FROM chat_threads WHERE listing_id=? AND buyer_username=? AND seller_username=? FOR UPDATE
+                SELECT * FROM chat_threads WHERE listing_id=? AND buyer_username=? AND seller_username=?
+                    AND deleted < 2 FOR UPDATE
                 """)) {
             stmt.setString(1, deal.getListingId()); stmt.setString(2, deal.getBuyerUsername()); stmt.setString(3, deal.getSellerUsername());
             try (ResultSet rows = stmt.executeQuery()) {

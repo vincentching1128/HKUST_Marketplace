@@ -138,8 +138,9 @@ CREATE TABLE IF NOT EXISTS notifications(
 
 CREATE TABLE IF NOT EXISTS deals(
     id VARCHAR(50) PRIMARY KEY,
-    buyer_username VARCHAR(50) NOT NULL,
-    seller_username VARCHAR(50) NOT NULL,
+    -- NULL after that participant's account is permanently deleted; the deal is preserved
+    buyer_username VARCHAR(50) NULL,
+    seller_username VARCHAR(50) NULL,
     listing_id VARCHAR(50) NOT NULL,
     dealType ENUM('BOUGHT','BORROWED','RECEIVED') NOT NULL,
     status ENUM('PENDING','COUNTERED','ACCEPTED','DECLINED','CANCELLED','COMPLETED','RETURNED') NOT NULL DEFAULT 'PENDING',
@@ -153,11 +154,15 @@ CREATE TABLE IF NOT EXISTS deals(
     createdDate DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     completedDate DATETIME(6) NULL,
     row_version BIGINT NOT NULL DEFAULT 1,
+    -- 0: both accounts exist, 1: one participant deleted, 2: both deleted (hidden by default)
+    deleted SMALLINT NOT NULL DEFAULT 0,
 
     INDEX idx_deals_buyer_status (buyer_username, status),
     INDEX idx_deals_seller_status (seller_username, status),
     INDEX idx_deals_status_created (status, createdDate),
+    INDEX idx_deals_deleted (deleted, createdDate),
 
+    CONSTRAINT chk_deals_deleted CHECK (deleted BETWEEN 0 AND 2),
     CONSTRAINT chk_deals_offered_price_nonnegative
         CHECK (offeredPrice IS NULL OR offeredPrice >= 0),
     CONSTRAINT chk_deals_counter_price_nonnegative
@@ -170,9 +175,9 @@ CREATE TABLE IF NOT EXISTS deals(
         CHECK (status <> 'COMPLETED' OR completedDate IS NOT NULL),
 
     CONSTRAINT fk_deals_buyer_user FOREIGN KEY (buyer_username)
-        REFERENCES users(username) ON UPDATE CASCADE ON DELETE CASCADE,
+        REFERENCES users(username) ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT fk_deals_seller_user FOREIGN KEY (seller_username)
-        REFERENCES users(username) ON UPDATE CASCADE ON DELETE CASCADE,
+        REFERENCES users(username) ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT fk_deals_item FOREIGN KEY (listing_id)
         REFERENCES listings(id) ON UPDATE CASCADE ON DELETE CASCADE
 
@@ -214,9 +219,13 @@ CREATE TABLE IF NOT EXISTS chat_threads (
     buyer_name VARCHAR(50) NOT NULL,
     seller_name VARCHAR(50) NOT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    -- 0: both accounts exist, 1: one participant deleted, 2: both deleted (hidden by default)
+    deleted SMALLINT NOT NULL DEFAULT 0,
     UNIQUE KEY uq_chat_parties (listing_id, buyer_username, seller_username),
     INDEX idx_chat_buyer (buyer_username, created_at),
     INDEX idx_chat_seller (seller_username, created_at),
+    INDEX idx_chat_deleted (deleted),
+    CONSTRAINT chk_chat_threads_deleted CHECK (deleted BETWEEN 0 AND 2),
     CONSTRAINT fk_chat_listing FOREIGN KEY (listing_id)
         REFERENCES listings(id) ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT fk_chat_buyer FOREIGN KEY (buyer_username)

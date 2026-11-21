@@ -193,10 +193,18 @@ public class UserRepository {
     }
 
     /**
-     * Permanently deletes a buyer/seller account. Their listings are first marked REMOVED
-     * and the user row is deleted in the same transaction; the listings foreign key uses
-     * ON DELETE SET NULL, so the retained listings become orphaned instead of blocking the
-     * delete. Admin accounts cannot be removed here.
+     * Permanently deletes a buyer/seller account in one transaction:
+     * <ol>
+     *   <li>locks/validates the account first, so retrying a deletion is idempotent
+     *       (a missing account aborts before any counter is touched);</li>
+     *   <li>marks the seller's listings REMOVED and deletes the user's notifications;</li>
+     *   <li>increments the participant-deletion counter ({@code deleted}, capped at 2) on
+     *       every deal and chat thread they participate in, cancelling still-open deals when
+     *       one participant remains;</li>
+     *   <li>deletes the user row; the deals/chat/listing FKs use ON DELETE SET NULL, so the
+     *       preserved records keep the remaining participant.</li>
+     * </ol>
+     * Admin accounts cannot be removed here.
      *
      * @throws IllegalArgumentException when the username is missing, unknown or an admin
      */
@@ -204,29 +212,64 @@ public class UserRepository {
         if (username == null || username.isBlank()) {
             throw new IllegalArgumentException("A username is required.");
         }
+        String name = username.trim();
+        String lockUser = "SELECT username FROM users WHERE username = ? AND role <> 'ADMIN' FOR UPDATE";
         String markListingsRemoved = """
                 UPDATE listings
                 SET listingStatus = 'REMOVED', rejection_reason = 'User account deleted',
                     row_version = row_version + 1
                 WHERE seller_username = ? AND listingStatus <> 'REMOVED'
                 """;
-        String deleteUser = "DELETE FROM users WHERE username = ? AND role <> 'ADMIN'";
         String deleteNotifications = "DELETE FROM notifications WHERE username = ?";
+        String cancelDeals = """
+                UPDATE deals
+                SET status = CASE WHEN deleted = 0 AND status IN ('PENDING','COUNTERED','ACCEPTED')
+                                  THEN 'CANCELLED' ELSE status END,
+                    deleted = LEAST(deleted + 1, 2)
+                WHERE deleted < 2 AND (buyer_username = ? OR seller_username = ?)
+                """;
+        String incrementChatThreads = """
+                UPDATE chat_threads
+                SET deleted = LEAST(deleted + 1, 2)
+                WHERE deleted < 2 AND (buyer_username = ? OR seller_username = ?)
+                """;
+        String deleteUser = "DELETE FROM users WHERE username = ? AND role <> 'ADMIN'";
         try (Connection conn = DatabaseManager.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                //idempotency guard: only an existing, non-admin account can be deleted
+                try (PreparedStatement stmt = conn.prepareStatement(lockUser)) {
+                    stmt.setString(1, name);
+                    try (ResultSet rows = stmt.executeQuery()) {
+                        if (!rows.next()) {
+                            throw new IllegalArgumentException("User not found or account cannot be deleted.");
+                        }
+                    }
+                }
                 try (PreparedStatement stmt = conn.prepareStatement(markListingsRemoved)) {
-                    stmt.setString(1, username.trim());
+                    stmt.setString(1, name);
                     stmt.executeUpdate();
                 }
                 //remove the account's notifications in the same transaction (the FK also cascades)
                 try (PreparedStatement stmt = conn.prepareStatement(deleteNotifications)) {
-                    stmt.setString(1, username.trim());
+                    stmt.setString(1, name);
+                    stmt.executeUpdate();
+                }
+                //deals: count the deletion, cancel open deals when one participant remains
+                try (PreparedStatement stmt = conn.prepareStatement(cancelDeals)) {
+                    stmt.setString(1, name);
+                    stmt.setString(2, name);
+                    stmt.executeUpdate();
+                }
+                //chats: deleted = 2 hides the thread from default queries, deleted = 1 keeps it
+                try (PreparedStatement stmt = conn.prepareStatement(incrementChatThreads)) {
+                    stmt.setString(1, name);
+                    stmt.setString(2, name);
                     stmt.executeUpdate();
                 }
                 int deleted;
                 try (PreparedStatement stmt = conn.prepareStatement(deleteUser)) {
-                    stmt.setString(1, username.trim());
+                    stmt.setString(1, name);
                     deleted = stmt.executeUpdate();
                 }
                 if (deleted != 1) {

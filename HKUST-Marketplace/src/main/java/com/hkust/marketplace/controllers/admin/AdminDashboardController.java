@@ -1031,10 +1031,10 @@ public class AdminDashboardController {
                 c.getValue().getListingTitle()));
         TableColumn<Deal, String> buyerCol = new TableColumn<>("Buyer Username");
         buyerCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
-                c.getValue().getBuyerUsername()));
+                displayDealParty(c.getValue().getBuyerUsername())));
         TableColumn<Deal, String> sellerCol = new TableColumn<>("Seller Username");
         sellerCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
-                c.getValue().getSellerUsername()));
+                displayDealParty(c.getValue().getSellerUsername())));
         TableColumn<Deal, String> typeCol = new TableColumn<>("Deal Type");
         typeCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
                 dealTypeDisplay(c.getValue().getDealType())));
@@ -1090,6 +1090,11 @@ public class AdminDashboardController {
         VBox.setVgrow(table, Priority.ALWAYS);
         contentPane.getChildren().add(root);
         reload.run();
+    }
+
+    /** A deal keeps one participant after an account is deleted; show that clearly in admin. */
+    private String displayDealParty(String username) {
+        return username == null || username.isBlank() ? "(deleted user)" : username;
     }
 
     /** Database deal types are BOUGHT/BORROWED/RECEIVED; the model exposes ListingType. */
