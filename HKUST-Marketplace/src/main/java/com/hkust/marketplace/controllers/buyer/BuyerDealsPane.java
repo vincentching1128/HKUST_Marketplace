@@ -22,6 +22,7 @@ public class BuyerDealsPane extends VBox {
     private final Supplier<User> user;
     private final Consumer<String> openListing;
     private final Consumer<String> openChat;
+    private final Consumer<String> openHistory;
     private final VBox rows = new VBox(12);
     private final Label feedback = new Label();
     private final Button refresh = new Button("Refresh");
@@ -29,12 +30,13 @@ public class BuyerDealsPane extends VBox {
     private long request;
 
     public BuyerDealsPane(BuyerDealService service, Supplier<User> user,
-                          Consumer<String> openListing, Consumer<String> openChat) {
+                          Consumer<String> openListing, Consumer<String> openChat, Consumer<String> openHistory) {
         super(12);
         this.service = Objects.requireNonNull(service);
         this.user = Objects.requireNonNull(user);
         this.openListing = Objects.requireNonNull(openListing);
         this.openChat = Objects.requireNonNull(openChat);
+        this.openHistory = Objects.requireNonNull(openHistory);
         setPadding(new Insets(4));
         refresh.getStyleClass().add("btn-outline");
         refresh.setOnAction(event -> refresh());
@@ -80,7 +82,8 @@ public class BuyerDealsPane extends VBox {
         title.setWrapText(true);
         title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
         VBox card = new VBox(9, title,
-                new Label("Seller: @" + deal.getSellerUsername() + "  |  " + deal.getDealType() + "  |  " + deal.getStatus().getDisplayName()),
+                new Label((deal.getSellerUsername() == null ? "Deleted seller" : "Seller: @" + deal.getSellerUsername())
+                        + "  |  " + deal.getDealType() + "  |  " + deal.getStatus().getDisplayName()),
                 new Label("Submitted: " + format(deal.getCreatedAt())));
         card.getStyleClass().add("card");
         card.setPadding(new Insets(18));
@@ -99,24 +102,29 @@ public class BuyerDealsPane extends VBox {
         actions.getChildren().add(button("View Listing", () -> openListing.accept(deal.getListingId())));
         actions.getChildren().add(button("Open Chat", () -> openChat.accept(deal.getId())));
         if (deal.getStatus() == DealStatus.COUNTERED) {
-            actions.getChildren().add(button("Accept Counter", () -> act(deal, service::acceptCounter, "Counteroffer accepted.")));
-            actions.getChildren().add(button("Decline Counter", () -> act(deal, service::declineCounter, "Counteroffer declined.")));
+            actions.getChildren().add(button("Accept Counter", () -> act(deal, service::acceptCounter, "Counteroffer accepted.", this::refresh)));
+            actions.getChildren().add(button("Decline Counter", () -> act(deal, service::declineCounter, "Counteroffer declined.", this::refresh)));
         }
         if (deal.getStatus() == DealStatus.ACCEPTED) {
             if (deal.getDealType() == ListingType.LEND) {
-                Button giveBack = button("Self Return", () -> act(deal, service::returnBorrowed, "Borrowing returned."));
+                Button giveBack = button("Self Return", () -> act(deal, service::returnBorrowed,
+                        "Borrowing returned.", () -> openHistory.accept(deal.getId())));
                 giveBack.setDisable(deal.getBorrowStart() == null || LocalDateTime.now().isBefore(deal.getBorrowStart()));
                 actions.getChildren().add(giveBack);
             } else {
-                actions.getChildren().add(button("Mark Complete", () -> act(deal, service::complete, "Deal completed. You can rate the seller when reviews are available.")));
+                actions.getChildren().add(button("Mark Complete", () -> act(deal, service::complete,
+                        "Deal completed.", () -> openHistory.accept(deal.getId()))));
             }
+        }
+        if (deal.getStatus() == DealStatus.RETURNED || deal.getStatus() == DealStatus.COMPLETED) {
+            actions.getChildren().add(button("Review in Deal History", () -> openHistory.accept(deal.getId())));
         }
         card.getChildren().add(actions);
         return card;
     }
 
     @FunctionalInterface private interface Action { void run(User buyer, String id, long version) throws SQLException; }
-    private void act(Deal deal, Action action, String success) {
+    private void act(Deal deal, Action action, String success, Runnable onSaved) {
         if (!active) return;
         User buyer = user.get();
         long token = ++request;
@@ -130,7 +138,7 @@ public class BuyerDealsPane extends VBox {
             if (!current(token, buyer)) return;
             rows.setDisable(false);
             feedback.setText(success);
-            refresh();
+            onSaved.run();
         });
         task.setOnFailed(event -> {
             if (!current(token, buyer)) return;

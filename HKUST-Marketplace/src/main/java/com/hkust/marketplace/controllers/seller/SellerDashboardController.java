@@ -11,6 +11,7 @@ import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.services.DealService;
 import com.hkust.marketplace.services.ChatService;
 import com.hkust.marketplace.services.ReviewService;
+import com.hkust.marketplace.controllers.SellerProfilePane;
 import com.hkust.marketplace.controllers.ChatInboxPane;
 import com.hkust.marketplace.controllers.ChatPane;
 import javafx.concurrent.Task;
@@ -334,6 +335,7 @@ public class SellerDashboardController {
             reason.setWrapText(true);
             details.getChildren().add(reason);
         }
+        details.getChildren().add(SellerProfilePane.listingFeedback(listing.getSellerUsername()));
         return details;
     }
 
@@ -937,6 +939,7 @@ public class SellerDashboardController {
                 new Label("Bio"), bio,
                 new Label("Preferred Meet-up"), meetup,
                 save);
+        form.getChildren().add(SellerProfilePane.profileButton(user.getUsername()));
         contentPane.getChildren().add(form);
     }
 
