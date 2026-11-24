@@ -8,12 +8,15 @@ import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.services.AuthService;
 import java.sql.SQLException;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 public class SellerRegisterController {
 
     private final UserRepository userRepository = new UserRepository();
+    private final AuthService authService = new AuthService(userRepository);
 
     @FXML private TextField usernameField;
     @FXML private TextField fullNameField;
@@ -57,11 +60,11 @@ public class SellerRegisterController {
         if (bio.getBytes(StandardCharsets.UTF_8).length > 65_535) {
             showError("Seller Bio must be at most 65,535 UTF-8 bytes."); return;
         }
-        String pwdCheck = DummyDataService.checkPasswordStrength(password);
+        String pwdCheck = AuthService.checkPasswordStrength(password);
         if (!"OK".equals(pwdCheck)) { showError(pwdCheck); return; }
         if (!password.equals(confirm)) { showError("Passwords do not match."); return; }
 
-        User user = new User(username.toLowerCase(), fullName, password, UserRole.SELLER);
+        User user = new User(username.toLowerCase(Locale.ROOT), fullName, null, UserRole.SELLER);
         if (meetup != null) user.setPreferredMeetup(meetup);
         if (!bio.isBlank()) user.setBio(bio);
         try {
@@ -69,14 +72,14 @@ public class SellerRegisterController {
                 showError("Username already taken.");
                 return;
             }
-            userRepository.register(user);
+            authService.register(user, password);
 
             showSuccess("Seller account created! You can now login.");
             usernameField.clear(); fullNameField.clear(); passwordField.clear();
             confirmPasswordField.clear(); meetupCombo.getSelectionModel().clearSelection(); bioArea.clear();
         } catch (IllegalArgumentException e) {
             // The repository also checks for an existing username.
-            showError("Username already taken.");
+            showError(e.getMessage());
         } catch (SQLException e) {
             if (e.getErrorCode() == 1062) {
                 // MySQL can reject a duplicate inserted after the initial check.

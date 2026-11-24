@@ -1,9 +1,7 @@
 package com.hkust.marketplace.controllers.admin;
 
-import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
-import com.hkust.marketplace.repositories.UserRepository;
-//import com.hkust.marketplace.utils.DummyDataService;
+import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.fxml.FXML;
@@ -20,7 +18,7 @@ public class AdminLoginController {
     @FXML private PasswordField passwordField;
     @FXML private Label errorLabel;
 
-    private final UserRepository userRepository = new UserRepository();
+    private final AuthService authService = new AuthService();
 
     @FXML
     private void handleLogin() {
@@ -33,21 +31,25 @@ public class AdminLoginController {
             showError("Please enter credentials.");
             return;
         }
-        User user;
+        AuthService.LoginResult result;
         try{
-            user = userRepository.findByUsername(username);
+            result = authService.login(username, password, UserRole.ADMIN);
         } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
-        if (user == null || user.getRole() != UserRole.ADMIN) {
-            showError("Invalid admin credentials.");
+            showError("Unable to sign in. Please check the database connection and try again.");
             return;
         }
-        if (!user.getPasswordHash().equals(password)) {
-            showError("Incorrect password.");
+        if (result.status() != AuthService.LoginStatus.SUCCESS) {
+            showError(switch (result.status()) {
+                case USER_NOT_FOUND -> "User not found.";
+                case WRONG_ROLE -> "This account is not an Admin account. Use the correct portal.";
+                case ACCOUNT_DEACTIVATED -> "Account deactivated.";
+                case INCORRECT_PASSWORD -> "Incorrect password.";
+                case ACCOUNT_CHANGED -> "Account changed during sign-in. Please try again.";
+                default -> "Please enter a valid username and password.";
+            });
             return;
         }
-        SessionManager.login(user);
+        SessionManager.login(result.user());
         SceneManager.showAdminDashboard();
     }
 

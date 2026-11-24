@@ -1,6 +1,8 @@
 package com.hkust.marketplace.utils;
 
 import com.hkust.marketplace.models.*;
+import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.PasswordHasher;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -72,16 +74,16 @@ public class DummyDataService {
         // Admin
         User admin = new User("admin", "System Admin", "admin123", UserRole.ADMIN);
         admin.setFullName("HKUST Marketplace Admin");
-        users.put("admin", admin);
+        registerUser(admin);
 
         // Sample buyers
         User buyer1 = new User("alice", "Alice Chan", "password1", UserRole.BUYER);
         buyer1.setResidenceHall("Hall 3");
-        users.put("alice", buyer1);
+        registerUser(buyer1);
 
         User buyer2 = new User("bob", "Bob Wong", "password1", UserRole.BUYER);
         buyer2.setResidenceHall("Off-campus");
-        users.put("bob", buyer2);
+        registerUser(buyer2);
 
         // Sample sellers
         User seller1 = new User("charlie", "Charlie Lee", "password1", UserRole.SELLER);
@@ -89,14 +91,14 @@ public class DummyDataService {
         seller1.setPreferredMeetup("Library");
         seller1.setAverageRating(4.7);
         seller1.setRatingCount(12);
-        users.put("charlie", seller1);
+        registerUser(seller1);
 
         User seller2 = new User("diana", "Diana Ng", "password1", UserRole.SELLER);
         seller2.setBio("Selling furniture and kitchen items before graduation.");
         seller2.setPreferredMeetup("Hall 5 Lobby");
         seller2.setAverageRating(4.3);
         seller2.setRatingCount(8);
-        users.put("diana", seller2);
+        registerUser(seller2);
 
         // Sample listings
         Listing l1 = createListing("Calculus Textbook (Stewart)", "Barely used, 8th edition. Perfect for MATH 1013.",
@@ -132,7 +134,7 @@ public class DummyDataService {
         d1.setBuyerUsername("alice");
         d1.setSellerUsername("charlie");
         d1.setDealType(ListingType.SELL);
-        d1.setStatus("Accepted");
+        d1.setStatus(DealStatus.ACCEPTED);
         d1.setOfferPrice(160.0);
         deals.add(d1);
 
@@ -186,6 +188,8 @@ public class DummyDataService {
     }
 
     public void registerUser(User user) {
+        // Registration input is plaintext; only its salted hash is kept in the store.
+        user.setPasswordHash(PasswordHasher.hash(user.getPasswordHash()));
         users.put(user.getUsername().toLowerCase(), user);
     }
 
@@ -253,6 +257,15 @@ public class DummyDataService {
     }
 
     public void addDeal(Deal deal) {
+        if (deal == null || deal.getBuyerUsername() == null
+                || deal.getBuyerUsername().isBlank()
+                || deal.getSellerUsername() == null
+                || deal.getSellerUsername().isBlank()) {
+            throw new IllegalArgumentException("Deal buyer and seller are required.");
+        }
+        if (deal.getBuyerUsername().equalsIgnoreCase(deal.getSellerUsername())) {
+            throw new IllegalArgumentException("Deal buyer and seller must be different users.");
+        }
         if (deal.getId() == null) {
             deal.setId("D" + dealIdCounter.getAndIncrement());
         }
@@ -292,16 +305,8 @@ public class DummyDataService {
         reviews.add(r);
     }
 
-    // Password strength helper (demo)
+    // Retained for existing UI callers; use the shared password policy.
     public static String checkPasswordStrength(String password) {
-        if (password == null || password.isEmpty()) return "Password cannot be empty.";
-        if (password.length() < 8) return "Password must be at least 8 characters.";
-        boolean hasUpper = password.chars().anyMatch(Character::isUpperCase);
-        boolean hasLower = password.chars().anyMatch(Character::isLowerCase);
-        boolean hasDigit = password.chars().anyMatch(Character::isDigit);
-        if (!hasUpper || !hasLower || !hasDigit) {
-            return "Password should contain uppercase, lowercase and a digit.";
-        }
-        return "OK";
+        return AuthService.checkPasswordStrength(password);
     }
 }

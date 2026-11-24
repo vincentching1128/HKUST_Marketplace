@@ -1,32 +1,54 @@
 package com.hkust.marketplace.controllers.buyer;
 
-import com.hkust.marketplace.models.Listing;
-import com.hkust.marketplace.models.ListingType;
-import com.hkust.marketplace.models.Notification;
 import com.hkust.marketplace.models.User;
-import com.hkust.marketplace.utils.DummyDataService;
+import com.hkust.marketplace.models.UserRole;
+import com.hkust.marketplace.controllers.NotificationBoard;
+import com.hkust.marketplace.models.ChatThread;
+import com.hkust.marketplace.models.Deal;
+import com.hkust.marketplace.models.DealStatus;
+import com.hkust.marketplace.controllers.ChatInboxPane;
+import com.hkust.marketplace.controllers.ChatPane;
+import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.repositories.NotificationRepository;
+import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.NotificationService;
+import com.hkust.marketplace.services.BuyerListingService;
+import com.hkust.marketplace.services.BuyerDealService;
+import com.hkust.marketplace.services.ChatService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
-import java.time.format.DateTimeFormatter;
-import java.util.List;
+import java.sql.SQLException;
+import java.util.Objects;
+import java.util.concurrent.Callable;
 
 public class BuyerDashboardController {
+
+    private final UserRepository userRepository = new UserRepository();
+    private final AuthService authService = new AuthService(userRepository);
+    private final NotificationRepository notificationRepository = new NotificationRepository();
 
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
     @FXML private Label welcomeLabel;
-    @FXML private Button btnBrowse, btnDeals, btnHistory, btnFavourites, btnNotifications, btnProfile;
+    @FXML private Button btnBrowse, btnDeals, btnChats, btnHistory, btnFavourites, btnNotifications, btnProfile;
 
     private Button currentActiveBtn;
+    private NotificationBoard notificationBoard;
+    private BuyerListingsPane listingsPane;
+    private BuyerDealsPane dealsPane;
+    private ChatInboxPane chatInbox;
+    private ChatPane chatPane;
+    private final BuyerDealService buyerDeals = new BuyerDealService();
+    private final ChatService chatService = new ChatService();
+    private long navigationRequest;
 
     @FXML
     public void initialize() {
@@ -39,6 +61,13 @@ public class BuyerDashboardController {
     }
 
     private void setActive(Button btn, String title) {
+        if (notificationBoard != null && btn != btnNotifications) {
+            notificationBoard.deactivate();
+        }
+        navigationRequest++;
+        if (dealsPane != null) dealsPane.deactivate();
+        if (chatInbox != null) chatInbox.deactivate();
+        if (chatPane != null) chatPane.deactivate();
         if (currentActiveBtn != null) {
             currentActiveBtn.getStyleClass().remove("sidebar-btn-active");
         }
@@ -50,235 +79,111 @@ public class BuyerDashboardController {
     @FXML
     private void showBrowse() {
         setActive(btnBrowse, "Browse Marketplace");
-        contentPane.getChildren().clear();
-
-        VBox root = new VBox(16);
-        root.setPadding(new Insets(4));
-
-        // Filter bar
-        HBox filterBar = new HBox(12);
-        filterBar.setAlignment(Pos.CENTER_LEFT);
-        ComboBox<String> categoryFilter = new ComboBox<>(FXCollections.observableArrayList("All Categories"));
-        categoryFilter.getItems().addAll(DummyDataService.CATEGORIES);
-        categoryFilter.getSelectionModel().selectFirst();
-        ComboBox<String> typeFilter = new ComboBox<>(FXCollections.observableArrayList("All Types", "Sell", "Lend", "Giveaway"));
-        typeFilter.getSelectionModel().selectFirst();
-        TextField searchField = new TextField();
-        searchField.setPromptText("Search listings...");
-        searchField.setPrefWidth(220);
-        Button searchBtn = new Button("Search");
-        searchBtn.getStyleClass().addAll("btn-primary", "btn-sm");
-        filterBar.getChildren().addAll(
-                new Label("Category:"), categoryFilter,
-                new Label("Type:"), typeFilter,
-                searchField, searchBtn
-        );
-        root.getChildren().add(filterBar);
-
-        // Listing grid
-        FlowPane grid = new FlowPane(16, 16);
-        grid.setPrefWrapLength(900);
-
-        List<Listing> live = DummyDataService.getInstance().getLiveListings();
-        if (live.isEmpty()) {
-            Label empty = new Label("No live listings at the moment.");
-            empty.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 15px;");
-            root.getChildren().add(empty);
-        } else {
-            for (Listing listing : live) {
-                grid.getChildren().add(createListingCard(listing));
-            }
-            root.getChildren().add(grid);
+        if (listingsPane == null) {
+            listingsPane = new BuyerListingsPane(new BuyerListingService(),
+                    buyerDeals, chatService, SessionManager::getCurrentUser,
+                    pageTitle::setText, this::openChatForListing);
         }
-
-        ScrollPane scroll = new ScrollPane(root);
-        scroll.setFitToWidth(true);
-        scroll.setStyle("-fx-background-color: transparent;");
-        contentPane.getChildren().add(scroll);
-    }
-
-    private VBox createListingCard(Listing listing) {
-        VBox card = new VBox(8);
-        card.getStyleClass().add("listing-card");
-        card.setPrefWidth(260);
-        card.setMinHeight(200);
-
-        // Type badge + price
-        HBox top = new HBox();
-        top.setAlignment(Pos.CENTER_LEFT);
-        Label typeBadge = new Label(listing.getTypeDisplay());
-        typeBadge.getStyleClass().add("badge");
-        if (listing.getType() == ListingType.SELL) typeBadge.getStyleClass().add("badge-sold");
-        else if (listing.getType() == ListingType.LEND) typeBadge.getStyleClass().add("badge-pending");
-        else typeBadge.getStyleClass().add("badge-live");
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        Label price = new Label(listing.getPriceDisplay());
-        price.setStyle("-fx-font-weight: bold; -fx-text-fill: #003974; -fx-font-size: 16px;");
-        top.getChildren().addAll(typeBadge, spacer, price);
-
-        Label title = new Label(listing.getTitle());
-        title.setStyle("-fx-font-weight: bold; -fx-font-size: 15px; -fx-text-fill: #1a1a2e;");
-        title.setWrapText(true);
-
-        Label meta = new Label(listing.getCategory() + " · " + listing.getCondition());
-        meta.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
-
-        Label seller = new Label("Seller: " + listing.getSellerFullName());
-        seller.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
-
-        Label location = new Label("📍 " + listing.getMeetupLocation());
-        location.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
-
-        Label date = new Label("Posted: " + listing.getPostedAt().format(DateTimeFormatter.ofPattern("dd MMM yyyy")));
-        date.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
-
-        Button actionBtn = new Button();
-        actionBtn.getStyleClass().addAll("btn-primary", "btn-sm");
-        switch (listing.getType()) {
-            case SELL -> {
-                actionBtn.setText("Make Offer");
-                actionBtn.setOnAction(e -> showOfferDialog(listing));
-            }
-            case LEND -> {
-                actionBtn.setText("Request Borrow");
-                actionBtn.setOnAction(e -> showBorrowDialog(listing));
-            }
-            case GIVEAWAY -> {
-                actionBtn.setText("Claim Item");
-                actionBtn.setOnAction(e -> claimItem(listing));
-            }
-        }
-
-        card.getChildren().addAll(top, title, meta, seller, location, date, actionBtn);
-        return card;
-    }
-
-    private void showOfferDialog(Listing listing) {
-        TextInputDialog dialog = new TextInputDialog(String.valueOf(listing.getPrice() != null ? listing.getPrice() : 0));
-        dialog.setTitle("Make an Offer");
-        dialog.setHeaderText("Offer for: " + listing.getTitle());
-        dialog.setContentText("Your offer price (HK$):");
-        dialog.showAndWait().ifPresent(priceStr -> {
-            try {
-                double price = Double.parseDouble(priceStr);
-                Alert alert = new Alert(Alert.AlertType.INFORMATION);
-                alert.setTitle("Offer Submitted");
-                alert.setHeaderText(null);
-                alert.setContentText("Your offer of HK$" + price + " has been sent to " + listing.getSellerFullName() + ".\n\n(Demo only – no backend)");
-                alert.showAndWait();
-            } catch (NumberFormatException ex) {
-                new Alert(Alert.AlertType.ERROR, "Invalid price.").showAndWait();
-            }
-        });
-    }
-
-    private void showBorrowDialog(Listing listing) {
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Borrow Request");
-        alert.setHeaderText("Request to borrow: " + listing.getTitle());
-        alert.setContentText("Proposed duration: " + (listing.getLendingDays() != null ? listing.getLendingDays() + " days" : "N/A") +
-                "\n\nSend borrow request to seller?");
-        alert.showAndWait().ifPresent(resp -> {
-            if (resp == ButtonType.OK) {
-                new Alert(Alert.AlertType.INFORMATION, "Borrow request sent!\n(Demo only)").showAndWait();
-            }
-        });
-    }
-
-    private void claimItem(Listing listing) {
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Claim Item");
-        alert.setHeaderText("Claim: " + listing.getTitle());
-        alert.setContentText("Are you sure you want to claim this giveaway item?");
-        alert.showAndWait().ifPresent(resp -> {
-            if (resp == ButtonType.OK) {
-                new Alert(Alert.AlertType.INFORMATION, "Item claimed successfully!\n(Demo only)").showAndWait();
-            }
-        });
+        contentPane.getChildren().setAll(listingsPane);
+        listingsPane.showBrowse();
     }
 
     @FXML
     private void showMyDeals() {
         setActive(btnDeals, "My Deals");
-        contentPane.getChildren().clear();
+        dealsPane = new BuyerDealsPane(buyerDeals, SessionManager::getCurrentUser,
+                this::showDealListing, this::openChatForDeal, this::openHistory);
+        contentPane.getChildren().setAll(dealsPane);
+        dealsPane.refresh();
+    }
 
-        VBox root = new VBox(16);
-        root.setPadding(new Insets(4));
+    private void showDealListing(String listingId) {
+        setActive(btnBrowse, "Listing Details");
+        if (listingsPane == null) {
+            listingsPane = new BuyerListingsPane(new BuyerListingService(), buyerDeals, chatService,
+                    SessionManager::getCurrentUser, pageTitle::setText, this::openChatForListing);
+        }
+        contentPane.getChildren().setAll(listingsPane);
+        listingsPane.showListingDetails(listingId, this::showMyDeals);
+    }
 
-        Label info = new Label("Active offers, borrow requests and claims");
-        info.setStyle("-fx-text-fill: #5a5a7a;");
-        root.getChildren().add(info);
+    @FXML
+    private void showChats() {
+        setActive(btnChats, "Chats");
+        chatInbox = new ChatInboxPane(chatService, SessionManager::getCurrentUser,
+                thread -> showChatThread(thread.id(), thread.listingId()));
+        contentPane.getChildren().setAll(chatInbox);
+        chatInbox.refresh();
+    }
 
-        TableView<String[]> table = new TableView<>();
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+    private void showChatThread(String threadId, String listingId) {
+        setActive(btnChats, "Private Chat");
+        chatPane = new ChatPane(chatService, SessionManager::getCurrentUser, threadId,
+                this::showChats, listingId == null ? null : () -> showDealListing(listingId));
+        contentPane.getChildren().setAll(chatPane);
+        chatPane.refresh();
+    }
 
-        TableColumn<String[], String> colTitle = new TableColumn<>("Item");
-        colTitle.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[0]));
-        TableColumn<String[], String> colSeller = new TableColumn<>("Seller");
-        colSeller.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[1]));
-        TableColumn<String[], String> colType = new TableColumn<>("Type");
-        colType.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[2]));
-        TableColumn<String[], String> colStatus = new TableColumn<>("Status");
-        colStatus.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[3]));
-        TableColumn<String[], String> colAction = new TableColumn<>("Action");
-        colAction.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue()[4]));
+    private void openChatForListing(String listingId) {
+        openChat(() -> chatService.openForListing(SessionManager.getCurrentUser(), listingId), listingId);
+    }
 
-        table.getColumns().addAll(colTitle, colSeller, colType, colStatus, colAction);
+    private void openChatForDeal(String dealId) {
+        openChat(() -> {
+            User buyer = SessionManager.getCurrentUser();
+            ChatThread thread = chatService.openForDeal(buyer, dealId);
+            Deal deal = buyerDeals.getMyDeal(buyer, dealId);
+            if (deal.getStatus() == DealStatus.PENDING) {
+                try { chatService.sendProposal(buyer, thread.id(), dealId); }
+                catch (SQLException | IllegalArgumentException failure) {
+                    System.err.println("Formal proposal could not be shared in chat: " + failure.getMessage());
+                }
+            }
+            return thread;
+        }, null);
+    }
 
-        // Dummy rows
-        table.setItems(FXCollections.observableArrayList(
-                new String[]{"Calculus Textbook (Stewart)", "Charlie Lee", "Buy", "Accepted", "Chat / Complete"},
-                new String[]{"Graphing Calculator TI-84", "Diana Ng", "Borrow", "Pending", "View"}
-        ));
+    private void openChat(Callable<ChatThread> query, String fallbackListingId) {
+        setActive(btnChats, "Private Chat");
+        long token = navigationRequest;
+        User actor = SessionManager.getCurrentUser();
+        contentPane.getChildren().setAll(new VBox(12, new Label("Opening conversation..."), new ProgressIndicator()));
+        Task<ChatThread> task = new Task<>() {
+            @Override protected ChatThread call() throws Exception { return query.call(); }
+        };
+        task.setOnSucceeded(event -> {
+            if (currentNavigation(token, actor))
+                showChatThread(task.getValue().id(), task.getValue().listingId() == null
+                        ? fallbackListingId : task.getValue().listingId());
+        });
+        task.setOnFailed(event -> {
+            if (!currentNavigation(token, actor)) return;
+            Label error = new Label(task.getException() instanceof IllegalArgumentException
+                    ? task.getException().getMessage() : "Unable to open this conversation.");
+            error.setWrapText(true);
+            Button back = new Button("Back to Chats");
+            back.setOnAction(click -> showChats());
+            contentPane.getChildren().setAll(new VBox(12, error, back));
+        });
+        Thread worker = new Thread(task, "buyer-open-chat");
+        worker.setDaemon(true);
+        worker.start();
+    }
 
-        root.getChildren().add(table);
-        Label note = new Label("💡 Self-return for borrowed items and mark-complete are available here in the full version.");
-        note.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 12px;");
-        root.getChildren().add(note);
-
-        contentPane.getChildren().add(root);
+    private boolean currentNavigation(long token, User actor) {
+        User current = SessionManager.getCurrentUser();
+        return token == navigationRequest && actor != null && current != null
+                && Objects.equals(actor.getUsername(), current.getUsername());
     }
 
     @FXML
     private void showHistory() {
+        openHistory(null);
+    }
+
+    private void openHistory(String reviewDealId) {
         setActive(btnHistory, "Deal History");
-        contentPane.getChildren().clear();
-
-        VBox root = new VBox(16);
-        root.setPadding(new Insets(4));
-
-        HBox filters = new HBox(12);
-        filters.setAlignment(Pos.CENTER_LEFT);
-        DatePicker from = new DatePicker();
-        from.setPromptText("From");
-        DatePicker to = new DatePicker();
-        to.setPromptText("To");
-        TextField search = new TextField();
-        search.setPromptText("Search by title / seller...");
-        filters.getChildren().addAll(new Label("Date range:"), from, new Label("–"), to, search);
-        root.getChildren().add(filters);
-
-        TableView<String[]> table = new TableView<>();
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<String[], String> c1 = new TableColumn<>("Item Title");
-        c1.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue()[0]));
-        TableColumn<String[], String> c2 = new TableColumn<>("Seller");
-        c2.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue()[1]));
-        TableColumn<String[], String> c3 = new TableColumn<>("Deal Date");
-        c3.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue()[2]));
-        TableColumn<String[], String> c4 = new TableColumn<>("Type");
-        c4.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue()[3]));
-        TableColumn<String[], String> c5 = new TableColumn<>("Outcome");
-        c5.setCellValueFactory(d -> new javafx.beans.property.SimpleStringProperty(d.getValue()[4]));
-        table.getColumns().addAll(c1, c2, c3, c4, c5);
-        table.setItems(FXCollections.observableArrayList(
-                new String[]{"Old Chemistry Book", "Charlie Lee", "2025-11-12", "Bought", "Completed"},
-                new String[]{"USB Hub", "Diana Ng", "2025-10-03", "Received", "Completed"}
-        ));
-        root.getChildren().add(table);
-        contentPane.getChildren().add(root);
+        contentPane.getChildren().setAll(new BuyerHistoryPane(SessionManager.getCurrentUser(), buyerDeals, reviewDealId));
     }
 
     @FXML
@@ -301,40 +206,18 @@ public class BuyerDashboardController {
 
     @FXML
     private void showNotifications() {
-        setActive(btnNotifications, "Notification Board");
-        contentPane.getChildren().clear();
-
-        VBox root = new VBox(12);
-        root.setPadding(new Insets(4));
-
-        User user = SessionManager.getCurrentUser();
-        List<Notification> notifs = DummyDataService.getInstance()
-                .getNotificationsFor(user != null ? user.getUsername() : "");
-
-        if (notifs.isEmpty()) {
-            Label empty = new Label("No notifications yet.");
-            empty.setStyle("-fx-text-fill: #5a5a7a;");
-            root.getChildren().add(empty);
-        } else {
-            for (Notification n : notifs) {
-                VBox item = new VBox(4);
-                item.getStyleClass().add("notif-item");
-                Label title = new Label(n.getTitle());
-                title.setStyle("-fx-font-weight: bold; -fx-text-fill: #1a1a2e;");
-                Label msg = new Label(n.getMessage());
-                msg.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 13px;");
-                msg.setWrapText(true);
-                Label meta = new Label(n.getCategory() + " · " +
-                        n.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm")));
-                meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
-                item.getChildren().addAll(title, msg, meta);
-                root.getChildren().add(item);
-            }
+        setActive(btnNotifications, "Notifications");
+        User recipient = SessionManager.getCurrentUser();
+        if (recipient == null) {
+            SceneManager.showBuyerLogin();
+            return;
         }
-
-        ScrollPane scroll = new ScrollPane(root);
-        scroll.setFitToWidth(true);
-        contentPane.getChildren().add(scroll);
+        if (notificationBoard == null) {
+            notificationBoard = new NotificationBoard(
+                    new NotificationService(userRepository, notificationRepository, UserRole.BUYER));
+        }
+        contentPane.getChildren().setAll(notificationBoard);
+        notificationBoard.show(recipient);
     }
 
     @FXML
@@ -342,7 +225,23 @@ public class BuyerDashboardController {
         setActive(btnProfile, "Manage Profile");
         contentPane.getChildren().clear();
 
-        User user = SessionManager.getCurrentUser();
+        User sessionUser = SessionManager.getCurrentUser();
+        if (sessionUser == null) {
+            SceneManager.showBuyerLogin();
+            return;
+        }
+        User user;
+        try {
+            user = userRepository.findByUsername(sessionUser.getUsername());
+        } catch (SQLException e) {
+            new Alert(Alert.AlertType.ERROR, "Unable to load your profile. Please try again.").showAndWait();
+            return;
+        }
+        if (user == null) {
+            SessionManager.logout();
+            SceneManager.showBuyerLogin();
+            return;
+        }
         VBox form = new VBox(14);
         form.setPadding(new Insets(8));
         form.setMaxWidth(420);
@@ -351,7 +250,7 @@ public class BuyerDashboardController {
         Label title = new Label("Edit your profile");
         title.getStyleClass().add("section-title");
 
-        TextField nameField = new TextField(user != null ? user.getFullName() : "");
+        TextField nameField = new TextField(user.getFullName());
         nameField.setPromptText("Full Name");
         PasswordField newPass = new PasswordField();
         newPass.setPromptText("New password (leave blank to keep)");
@@ -360,14 +259,55 @@ public class BuyerDashboardController {
         ComboBox<String> residence = new ComboBox<>(FXCollections.observableArrayList(
                 "Hall 1", "Hall 2", "Hall 3", "Hall 4", "Hall 5",
                 "Hall 6", "Hall 7", "Hall 8", "Hall 9", "UG Hall 1", "UG Hall 2", "Off-campus"));
-        if (user != null && user.getResidenceHall() != null) {
+        if (user.getResidenceHall() != null) {
             residence.setValue(user.getResidenceHall());
         }
 
         Button saveBtn = new Button("Save Changes");
         saveBtn.getStyleClass().add("btn-primary");
         saveBtn.setOnAction(e -> {
-            new Alert(Alert.AlertType.INFORMATION, "Profile updated successfully!\n(Demo only – changes are in-memory)").showAndWait();
+            String fullName = nameField.getText().trim();
+            if (fullName.isEmpty() || fullName.codePointCount(0, fullName.length()) > 100) {
+                new Alert(Alert.AlertType.WARNING, "Full Name must contain 1 to 100 characters.").showAndWait();
+                return;
+            }
+            String password = newPass.getText();
+            if (!password.equals(confirmPass.getText())) {
+                new Alert(Alert.AlertType.WARNING, "Passwords do not match.").showAndWait();
+                return;
+            }
+            String selectedResidence = residence.getValue();
+            if (selectedResidence != null && selectedResidence.codePointCount(0, selectedResidence.length()) > 100) {
+                new Alert(Alert.AlertType.WARNING, "Residence must be at most 100 characters.").showAndWait();
+                return;
+            }
+            User profileUpdate = new User();
+            profileUpdate.setUsername(user.getUsername());
+            profileUpdate.setFullName(fullName);
+            profileUpdate.setResidenceHall(selectedResidence);
+            profileUpdate.setBio(user.getBio());
+            profileUpdate.setPreferredMeetup(user.getPreferredMeetup());
+            try {
+                if (!authService.updateProfile(profileUpdate, password)) {
+                    new Alert(Alert.AlertType.ERROR, "Profile not found.").showAndWait();
+                    return;
+                }
+                sessionUser.setFullName(fullName);
+                sessionUser.setResidenceHall(selectedResidence);
+                if (profileUpdate.getPasswordHash() != null) {
+                    sessionUser.setPasswordHash(profileUpdate.getPasswordHash());
+                }
+                newPass.clear();
+                confirmPass.clear();
+                welcomeLabel.setText("Hello, " + fullName);
+                notifyAccountChange("Buyer Profile Updated",
+                        "@" + sessionUser.getUsername() + " updated their buyer profile.");
+                new Alert(Alert.AlertType.INFORMATION, "Profile updated successfully.").showAndWait();
+            } catch (IllegalArgumentException invalidPassword) {
+                new Alert(Alert.AlertType.WARNING, invalidPassword.getMessage()).showAndWait();
+            } catch (SQLException databaseError) {
+                new Alert(Alert.AlertType.ERROR, "Unable to save your profile. Please try again.").showAndWait();
+            }
         });
 
         form.getChildren().addAll(title,
@@ -378,6 +318,15 @@ public class BuyerDashboardController {
                 saveBtn);
 
         contentPane.getChildren().add(form);
+    }
+
+    /** Best-effort admin audit notification for account changes. */
+    private void notifyAccountChange(String title, String message) {
+        try {
+            notificationRepository.notifyAllAdmins("Account", title, message);
+        } catch (SQLException | IllegalArgumentException ex) {
+            System.err.println("Failed to create account-change notification: " + ex.getMessage());
+        }
     }
 
     @FXML

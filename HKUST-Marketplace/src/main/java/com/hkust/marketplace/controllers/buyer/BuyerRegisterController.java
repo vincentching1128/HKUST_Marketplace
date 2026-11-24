@@ -2,13 +2,19 @@ package com.hkust.marketplace.controllers.buyer;
 
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
-import com.hkust.marketplace.utils.DummyDataService;
+import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.utils.SceneManager;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
+import java.sql.SQLException;
+import java.util.Locale;
 
 public class BuyerRegisterController {
+
+    private final UserRepository userRepository = new UserRepository();
+    private final AuthService authService = new AuthService(userRepository);
 
     @FXML private TextField usernameField;
     @FXML private TextField fullNameField;
@@ -42,15 +48,23 @@ public class BuyerRegisterController {
             showError("Username is required.");
             return;
         }
-        if (DummyDataService.getInstance().usernameExists(username)) {
-            showError("Username already taken. Please choose another.");
+        if (username.codePointCount(0, username.length()) > 50) {
+            showError("Username must be at most 50 characters.");
             return;
         }
         if (fullName.isEmpty()) {
             showError("Full Name cannot be empty.");
             return;
         }
-        String pwdCheck = DummyDataService.checkPasswordStrength(password);
+        if (fullName.codePointCount(0, fullName.length()) > 100) {
+            showError("Full Name must be at most 100 characters.");
+            return;
+        }
+        if (residence != null && residence.codePointCount(0, residence.length()) > 100) {
+            showError("Residence must be at most 100 characters.");
+            return;
+        }
+        String pwdCheck = AuthService.checkPasswordStrength(password);
         if (!"OK".equals(pwdCheck)) {
             showError(pwdCheck);
             return;
@@ -60,20 +74,32 @@ public class BuyerRegisterController {
             return;
         }
 
-        // Create user (demo – password stored as-is)
-        User user = new User(username.toLowerCase(), fullName, password, UserRole.BUYER);
+        User user = new User(username.toLowerCase(Locale.ROOT), fullName, null, UserRole.BUYER);
         if (residence != null) {
             user.setResidenceHall(residence);
         }
-        DummyDataService.getInstance().registerUser(user);
+        try {
+            if (userRepository.existsByUsername(user.getUsername())) {
+                showError("Username already taken. Please choose another.");
+                return;
+            }
+            authService.register(user, password);
 
-        showSuccess("Registration successful! You can now login.");
-        // Clear form
-        usernameField.clear();
-        fullNameField.clear();
-        passwordField.clear();
-        confirmPasswordField.clear();
-        residenceCombo.getSelectionModel().clearSelection();
+            showSuccess("Registration successful! You can now login.");
+            usernameField.clear();
+            fullNameField.clear();
+            passwordField.clear();
+            confirmPasswordField.clear();
+            residenceCombo.getSelectionModel().clearSelection();
+        } catch (IllegalArgumentException e) {
+            showError(e.getMessage());
+        } catch (SQLException e) {
+            if (e.getErrorCode() == 1062) {
+                showError("Username already taken. Please choose another.");
+            } else {
+                showError("Unable to create your account. Please try again later.");
+            }
+        }
     }
 
     private void showError(String msg) {
