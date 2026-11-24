@@ -61,7 +61,7 @@ public class DealRepository {
         String sql = """
                 SELECT d.id, l.itemName, l.category, d.seller_username, u.full_name,
                        COALESCE(d.returnedDate, d.completedDate) AS closed_at, d.dealType, d.status,
-                       r.rating, r.comment, r.seller_reply, r.hidden
+                       r.rating, r.comment, r.seller_reply, r.hidden, d.offeredPrice, d.borrowStartDate, d.borrowDueDate
                 FROM deals d JOIN listings l ON l.id = d.listing_id
                 LEFT JOIN users u ON u.username = d.seller_username
                 LEFT JOIN reviews r ON r.deal_id = d.id
@@ -78,7 +78,9 @@ public class DealRepository {
                             rows.getString("category"), rows.getString("seller_username"), rows.getString("full_name"),
                             readDateTime(rows, "closed_at"), rows.getString("dealType"),
                             DealStatus.valueOf(rows.getString("status")), rows.getObject("rating", Integer.class),
-                            rows.getString("comment"), rows.getString("seller_reply"), rows.getBoolean("hidden")));
+                            rows.getString("comment"), rows.getString("seller_reply"), rows.getBoolean("hidden"),
+                            new com.hkust.marketplace.models.Listing.AgreedTerms(rows.getBigDecimal("offeredPrice"),
+                                    readDateTime(rows, "borrowStartDate"), readDateTime(rows, "borrowDueDate"))));
                 }
                 return history;
             }

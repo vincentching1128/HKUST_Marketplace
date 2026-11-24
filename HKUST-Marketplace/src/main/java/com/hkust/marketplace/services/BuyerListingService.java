@@ -44,9 +44,9 @@ public class BuyerListingService {
 
     /** Read a fresh listing, including approved listings that have become unavailable. */
     public Listing getListing(User user, String id) throws SQLException {
-        requireActiveBuyer(user);
+        User buyer = requireActiveBuyer(user);
         requireListingId(id);
-        Listing listing = listings.findVisibleById(id);
+        Listing listing = listings.findVisibleById(id, buyer.getUsername());
         if (listing == null) {
             throw new IllegalArgumentException("This listing is no longer available to view.");
         }

@@ -18,6 +18,28 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ListingRepository {
+    // Acceptance copies the agreed counter into offeredPrice / borrowStartDate / borrowDueDate.
+    static final String LISTINGS_WITH_DEAL = """
+            SELECT l.*, u.full_name AS seller_full_name, d.id AS agreed_deal,
+                   d.offeredPrice, d.borrowStartDate, d.borrowDueDate
+            FROM listings l JOIN users u ON u.username = l.seller_username
+            LEFT JOIN deals d ON d.id = (
+                SELECT a.id FROM deals a WHERE a.listing_id = l.id
+                  AND ((l.listingStatus IN ('RESERVED','LENT') AND a.status = 'ACCEPTED')
+                    OR (l.listingStatus IN ('SOLD','GIVEN') AND a.status = 'COMPLETED'))
+                ORDER BY a.completedDate DESC, a.createdDate DESC, a.id LIMIT 1
+            )
+            """;
+
+    static Listing mapSellerListing(ResultSet rows) throws SQLException {
+        Listing listing = mapRow(rows);
+        if (rows.getString("agreed_deal") != null) {
+            listing.setAgreedTerms(new Listing.AgreedTerms(rows.getBigDecimal("offeredPrice"),
+                    rows.getObject("borrowStartDate", LocalDateTime.class),
+                    rows.getObject("borrowDueDate", LocalDateTime.class)));
+        }
+        return listing;
+    }
 
     /** Reserve a LIVE listing as part of the same transaction that accepts its deal. */
     public boolean reserveForDeal(Connection connection, String listingId, String sellerUsername) throws SQLException {
@@ -170,10 +192,7 @@ public class ListingRepository {
     public List<Listing> findBySeller(String sellerUsername) throws SQLException {
         List<Listing> listings = new ArrayList<>();
         //read the seller's current name from users instead of storing a second copy
-        String sql = """
-                SELECT l.*, u.full_name AS seller_full_name
-                FROM listings l
-                JOIN users u ON u.username = l.seller_username
+        String sql = LISTINGS_WITH_DEAL + """
                 WHERE l.seller_username = ?
                   AND l.listingStatus <> 'REMOVED'
                 ORDER BY l.posted_at DESC, l.id DESC
@@ -184,7 +203,7 @@ public class ListingRepository {
              //allow SQL to identify the ? as java object
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    Listing listing = mapRow(rs);
+                    Listing listing = mapSellerListing(rs);
                     listings.add(listing);
                 }
             }
@@ -234,8 +253,7 @@ public class ListingRepository {
     }
 
     public Listing findByIdAndSeller(String id, String sellerUsername) throws SQLException {
-        String sql = "SELECT l.*, u.full_name AS seller_full_name FROM listings l "
-                + "JOIN users u ON u.username = l.seller_username WHERE l.id = ? AND l.seller_username = ?"
+        String sql = LISTINGS_WITH_DEAL + "WHERE l.id = ? AND l.seller_username = ?"
                 + " AND l.listingStatus <> 'REMOVED'";
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -244,7 +262,7 @@ public class ListingRepository {
             Listing listing;
             try (ResultSet rs = stmt.executeQuery()) {
                 if (!rs.next()) return null;
-                listing = mapRow(rs);
+                listing = mapSellerListing(rs);
             }
             listing.setPhotos(findPhotos(conn, id));
             return listing;
@@ -504,7 +522,7 @@ public class ListingRepository {
     }
 
     //turn a database row into a Listing, like the user repository
-    private Listing mapRow(ResultSet rs) throws SQLException {
+    private static Listing mapRow(ResultSet rs) throws SQLException {
         Listing listing = new Listing();
         listing.setId(rs.getString("id"));
         listing.setSellerUsername(rs.getString("seller_username"));

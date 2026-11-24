@@ -42,7 +42,7 @@ import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.ArrayList;
-import java.util.Locale;
+import com.hkust.marketplace.controllers.RatingDisplay;
 
 public class SellerDashboardController {
     private final UserRepository userRepository = new UserRepository();
@@ -193,12 +193,9 @@ public class SellerDashboardController {
         Label meta = new Label(l.getCategory() + " | " + l.getTypeDisplay() + " | " + l.getMeetupLocation());
         meta.setWrapText(true);
         meta.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
-        String terms = switch (l.getType()) {
-            case SELL -> String.format("HK$ %.2f", l.getPrice());
-            case LEND -> "Lending duration: " + l.getLendingDurationDisplay();
-            case GIVEAWAY -> "Free";
-        };
-        info.getChildren().addAll(title, meta, new Label(terms));
+        Label terms = new Label(l.termsDisplay());
+        terms.setWrapText(true);
+        info.getChildren().addAll(title, meta, terms);
         //keep the reason next to the listing so the seller knows why it was rejected
         if (l.getStatus() == ListingStatus.REJECTED && l.getRejectionReason() != null
                 && !l.getRejectionReason().isBlank()) {
@@ -319,11 +316,7 @@ public class SellerDashboardController {
             details.getChildren().add(label);
         }
         //only show the terms that apply to this listing type
-        switch (listing.getType()) {
-            case SELL -> details.getChildren().add(new Label(String.format("Price: HK$ %.2f", listing.getPrice())));
-            case LEND -> details.getChildren().add(new Label("Lending Duration: " + listing.getLendingDurationDisplay()));
-            case GIVEAWAY -> details.getChildren().add(new Label("Free"));
-        }
+        details.getChildren().add(new Label(listing.termsDisplay()));
         Label descriptionTitle = new Label("Description");
         descriptionTitle.setStyle("-fx-font-weight: bold;");
         Label description = new Label(listing.getDescription());
@@ -752,13 +745,13 @@ public class SellerDashboardController {
         VBox root = new VBox(20);
         root.setPadding(new Insets(4));
 
-        HBox metrics = new HBox(16);
+        FlowPane metrics = new FlowPane(16, 16);
         metrics.getChildren().addAll(
                 metricCard("Listing Views", Long.toString(stats.views()), "#1565c0"),
                 metricCard("Offers Received", Long.toString(stats.offersReceived()), "#003974"),
                 metricCard("Completed Deals", Long.toString(stats.completedDeals()), "#2e7d32"),
                 metricCard("Average Rating", stats.averageRating() == null ? "No ratings"
-                        : String.format(Locale.ENGLISH, "%.1f / 5", stats.averageRating()), "#A68137")
+                        : RatingDisplay.average(stats.averageRating()), "#A68137")
         );
         root.getChildren().add(metrics);
 
@@ -794,9 +787,10 @@ public class SellerDashboardController {
         VBox card = new VBox(4);
         card.getStyleClass().add("card");
         card.setAlignment(Pos.CENTER);
-        card.setPrefWidth(140);
+        card.setMinWidth(140);
         card.setPadding(new Insets(16));
         Label val = new Label(value);
+        val.setMinWidth(Region.USE_PREF_SIZE);
         val.setStyle("-fx-font-size: 28px; -fx-font-weight: bold; -fx-text-fill: " + color + ";");
         Label lbl = new Label(label);
         lbl.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");

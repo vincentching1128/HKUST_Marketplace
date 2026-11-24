@@ -60,6 +60,10 @@ public class BuyerListingRepository {
     }
 
     public Listing findVisibleById(String id) throws SQLException {
+        return findVisibleById(id, null);
+    }
+
+    public Listing findVisibleById(String id, String viewer) throws SQLException {
         // The guarded update counts every successful buyer detail opening, including
         // repeated openings by the same buyer. It does not bump row_version: views
         // must not cause a seller's content edit to fail its optimistic-lock check.
@@ -67,8 +71,7 @@ public class BuyerListingRepository {
                 + "SET l.view_count = l.view_count + 1 "
                 + "WHERE l.id = ? AND l.listingStatus IN " + VISIBLE_STATUSES
                 + " AND u.active = TRUE AND u.role = 'SELLER'";
-        String sql = "SELECT l.*, u.full_name AS seller_full_name FROM listings l "
-                + "JOIN users u ON u.username = l.seller_username "
+        String sql = ListingRepository.LISTINGS_WITH_DEAL + " AND d.buyer_username = ? "
                 + "WHERE l.id = ? AND l.listingStatus IN " + VISIBLE_STATUSES
                 + " AND u.active = TRUE AND u.role = 'SELLER'";
         try (Connection connection = connections.getConnection()) {
@@ -85,13 +88,14 @@ public class BuyerListingRepository {
                 }
                 Listing listing;
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
-                    statement.setString(1, id);
+                    statement.setString(1, viewer);
+                    statement.setString(2, id);
                     try (ResultSet rows = statement.executeQuery()) {
                         if (!rows.next()) {
                             connection.rollback();
                             return null;
                         }
-                        listing = mapRow(rows);
+                        listing = ListingRepository.mapSellerListing(rows);
                     }
                 }
                 try (PreparedStatement statement = connection.prepareStatement(

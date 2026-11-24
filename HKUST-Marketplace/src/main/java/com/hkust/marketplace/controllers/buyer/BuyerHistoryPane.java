@@ -1,5 +1,7 @@
 package com.hkust.marketplace.controllers.buyer;
 
+import com.hkust.marketplace.controllers.RatingDisplay;
+
 import com.hkust.marketplace.models.DealHistoryEntry;
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.services.BuyerDealService;
@@ -54,6 +56,7 @@ final class BuyerHistoryPane extends VBox {
         column("Seller", DealHistoryEntry::sellerDisplay);
         column("Deal Date", row -> row.closedAt() == null ? "Unknown" : DATE.format(row.closedAt()));
         column("Deal Type", row -> row.type().charAt(0) + row.type().substring(1).toLowerCase(Locale.ROOT));
+        column("Agreed terms", row -> "RECEIVED".equals(row.type()) ? "Free" : row.agreedTerms().display());
         column("Outcome", row -> row.outcome().getDisplayName());
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         table.setPlaceholder(new Label("No finished deals match these filters."));
@@ -157,11 +160,11 @@ final class BuyerHistoryPane extends VBox {
             rate.setOnAction(event -> writeReview(row));
             review.getChildren().add(rate);
         } else if (row.rating() != null) {
-            Label text = new Label("Your review · " + row.rating() + "/5"
-                    + (row.hidden() ? " · Hidden from public view" : "") + "\n" + row.comment()
+            Label heading = new Label("Your review" + (row.hidden() ? " · Hidden from public view" : ""));
+            Label text = new Label(row.comment()
                     + (row.reply() == null ? "" : "\nSeller reply: " + row.reply()));
             text.setWrapText(true);
-            ScrollPane scroll = new ScrollPane(text);
+            ScrollPane scroll = new ScrollPane(new VBox(4, heading, RatingDisplay.stars(row.rating()), text));
             scroll.setFitToWidth(true);
             scroll.setMaxHeight(135);
             review.getChildren().add(scroll);

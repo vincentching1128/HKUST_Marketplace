@@ -151,6 +151,15 @@ public class NotificationRepository {
     }
 
     /** Scope a portal action to its authenticated recipient. */
+    public int markAllAsRead(String username) throws SQLException {
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "UPDATE notifications SET isRead = TRUE WHERE username = ? AND isRead = FALSE")) {
+            stmt.setString(1, username);
+            return stmt.executeUpdate();
+        }
+    }
+
     public boolean markAsRead(String notificationId, String username) throws SQLException {
         if (notificationId == null || notificationId.isBlank() || username == null || username.isBlank()) {
             throw new IllegalArgumentException("A notification ID and recipient are required.");

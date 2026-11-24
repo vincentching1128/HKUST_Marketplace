@@ -30,6 +30,10 @@ public class NotificationService {
         return notifications.markAsRead(notificationId, requireRecipient(recipient).getUsername());
     }
 
+    public int markAllAsRead(User recipient) throws SQLException {
+        return notifications.markAllAsRead(requireRecipient(recipient).getUsername());
+    }
+
     private User requireRecipient(User recipient) throws SQLException {
         User current = recipient == null || recipient.getRole() != role
                 || recipient.getUsername() == null || recipient.getUsername().isBlank()

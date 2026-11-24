@@ -87,11 +87,16 @@ public class BuyerDealsPane extends VBox {
                 new Label("Submitted: " + format(deal.getCreatedAt())));
         card.getStyleClass().add("card");
         card.setPadding(new Insets(18));
-        if (deal.getDealType() == ListingType.SELL) {
-            card.getChildren().add(new Label("Your offer: HK$" + deal.getOfferPrice()));
+        String agreedTerms = deal.agreedTermsDisplay();
+        if (!agreedTerms.isEmpty()) {
+            card.getChildren().add(new Label(agreedTerms));
+            if (deal.getStatus() == DealStatus.ACCEPTED && deal.getDealType() == ListingType.LEND) {
+                card.getChildren().add(new Label("Due: " + format(deal.getBorrowEnd())));
+            }
+        } else if (deal.getDealType() == ListingType.SELL) {
+            card.getChildren().add(new Label(String.format(java.util.Locale.ENGLISH, "Your offer: HK$ %.2f", deal.getOfferPrice())));
         } else if (deal.getDealType() == ListingType.LEND) {
-            card.getChildren().add(new Label("Borrow: " + format(deal.getBorrowStart()) + " to " + format(deal.getBorrowEnd())));
-            if (deal.getStatus() == DealStatus.ACCEPTED) card.getChildren().add(new Label("Due: " + format(deal.getBorrowEnd())));
+            card.getChildren().add(new Label("Requested period: " + format(deal.getBorrowStart()) + " to " + format(deal.getBorrowEnd())));
         }
         if (deal.getStatus() == DealStatus.COUNTERED) {
             card.getChildren().add(new Label(deal.getDealType() == ListingType.SELL

@@ -20,12 +20,13 @@ public class DatabaseManager {
             Logger.getLogger(DatabaseManager.class.getName());
 
     public static Connection getConnection() throws SQLException {
-        Path configFile = Path.of(System.getProperty("user.home"),
-                ".hkust-marketplace", "database.properties");
-        Properties credentials = loadCredentials(System.getenv("MARKETPLACE_DB_USER"),
-                System.getenv("MARKETPLACE_DB_PASSWORD"), configFile);
+        String explicitConfig = System.getProperty("marketplace.db.config");
+        Properties credentials = explicitConfig == null
+                ? loadCredentials(System.getenv("MARKETPLACE_DB_USER"), System.getenv("MARKETPLACE_DB_PASSWORD"),
+                        Path.of(System.getProperty("user.home"), ".hkust-marketplace", "database.properties"))
+                : loadCredentials(null, null, Path.of(explicitConfig));
 
-        return DriverManager.getConnection(URL, credentials.getProperty("username"),
+        return DriverManager.getConnection(credentials.getProperty("url", URL), credentials.getProperty("username"),
                 credentials.getProperty("password"));
     }
 

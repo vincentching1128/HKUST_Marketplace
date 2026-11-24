@@ -214,7 +214,7 @@ public class BuyerListingsPane extends VBox {
         thumbnail.setMinHeight(150);
         Label title = wrapped(listing.getTitle());
         title.setStyle("-fx-font-weight: bold; -fx-font-size: 15px;");
-        card.getChildren().addAll(thumbnail, title, wrapped(listing.getTypeDisplay() + " · " + terms(listing)),
+        card.getChildren().addAll(thumbnail, title, wrapped(listing.getTypeDisplay() + " · " + listing.termsDisplay()),
                 wrapped(listing.getCategory() + " · " + listing.getCondition()),
                 wrapped("Seller: " + sellerName(listing)), wrapped("Meet-up: " + listing.getMeetupLocation()),
                 wrapped("Posted: " + postedDate(listing)), statusLabel(listing),
@@ -251,7 +251,7 @@ public class BuyerListingsPane extends VBox {
         String[][] fields = {
                 {"Seller", sellerName(listing)}, {"Seller Username", listing.getSellerUsername()},
                 {"Category", listing.getCategory()}, {"Condition", listing.getCondition()},
-                {"Listing Type", listing.getTypeDisplay()}, {"Terms", terms(listing)},
+                {"Listing Type", listing.getTypeDisplay()}, {"Terms", listing.termsDisplay()},
                 {"Meet-up Location", listing.getMeetupLocation()}, {"Posted", postedDate(listing)},
                 {"Views", String.valueOf(listing.getViewCount())}
         };
@@ -494,14 +494,6 @@ public class BuyerListingsPane extends VBox {
     private String sellerName(Listing listing) {
         String name = listing.getSellerFullName();
         return name == null || name.isBlank() ? listing.getSellerUsername() : name;
-    }
-
-    private String terms(Listing listing) {
-        return switch (listing.getType()) {
-            case SELL -> String.format(Locale.ENGLISH, "HK$ %.2f", listing.getPrice());
-            case LEND -> "Lending duration: " + listing.getLendingDurationDisplay();
-            case GIVEAWAY -> "Free";
-        };
     }
 
     private String postedDate(Listing listing) {

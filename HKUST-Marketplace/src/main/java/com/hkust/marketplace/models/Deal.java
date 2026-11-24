@@ -28,6 +28,13 @@ public class Deal {
         this.rated = false;
     }
 
+    public String agreedTermsDisplay() {
+        if (status != DealStatus.ACCEPTED && status != DealStatus.COMPLETED && status != DealStatus.RETURNED) return "";
+        if (dealType == ListingType.GIVEAWAY) return "Free";
+        return new Listing.AgreedTerms(offerPrice == null ? null : java.math.BigDecimal.valueOf(offerPrice),
+                borrowStart, borrowEnd).display();
+    }
+
     // Getters & Setters
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }

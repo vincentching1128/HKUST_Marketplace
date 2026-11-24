@@ -8,6 +8,27 @@ import java.util.List;
  * Listing details shared by the screens and database repository.
  */
 public class Listing {
+    public record AgreedTerms(java.math.BigDecimal price, LocalDateTime start, LocalDateTime due) {
+        private static final java.time.format.DateTimeFormatter DATE =
+                java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm:ss", java.util.Locale.ENGLISH);
+
+        public String display() {
+            if (price != null) return String.format(java.util.Locale.ENGLISH, "Agreed price: HK$ %.2f", price);
+            if (start != null && due != null) return "Agreed borrowing period: " + DATE.format(start) + " to " + DATE.format(due);
+            return "Terms unavailable";
+        }
+    }
+
+    public String termsDisplay() {
+        if (type == ListingType.GIVEAWAY) return "Free";
+        if (agreedTerms != null) return agreedTerms.display();
+        if (type == ListingType.LEND) return "Lending duration: " + getLendingDurationDisplay();
+        return String.format(java.util.Locale.ENGLISH, "Asking price: HK$ %.2f", price);
+    }
+    private AgreedTerms agreedTerms;
+
+    public AgreedTerms getAgreedTerms() { return agreedTerms; }
+    public void setAgreedTerms(AgreedTerms terms) { agreedTerms = terms; }
     public static final int MAX_PHOTO_BYTES = 16_777_215; //MySQL MEDIUMBLOB limit per photo
     private String id;
     private String title;

@@ -1,5 +1,7 @@
 package com.hkust.marketplace.controllers.admin;
 
+import com.hkust.marketplace.controllers.RatingDisplay;
+
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.controllers.NotificationBoard;
 import com.hkust.marketplace.controllers.SellerProfilePane;
@@ -1050,7 +1052,9 @@ public class AdminDashboardController {
         TableColumn<Deal, String> statusCol = new TableColumn<>("Status");
         statusCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
                 c.getValue().getStatus() == null ? "—" : c.getValue().getStatus().getDisplayName()));
-        table.getColumns().addAll(titleCol, buyerCol, sellerCol, typeCol, startCol, endCol, statusCol);
+        TableColumn<Deal, String> termsCol = new TableColumn<>("Agreed terms");
+        termsCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue().agreedTermsDisplay()));
+        table.getColumns().addAll(titleCol, buyerCol, sellerCol, typeCol, termsCol, startCol, endCol, statusCol);
 
         // The combo listener is suppressed while Reset sets the selection programmatically.
         boolean[] suppressReload = {false};
@@ -1252,10 +1256,11 @@ public class AdminDashboardController {
         row.getStyleClass().add("card");
         row.setPadding(new Insets(12));
 
-        Label stars = new Label("★".repeat(review.getRating()) + "☆".repeat(5 - review.getRating())
-                + "  @" + review.getSellerUsername() + " by @" + review.getBuyerUsername()
+        Label stars = RatingDisplay.stars(review.getRating());
+        String seller = review.getSellerUsername() == null ? "Deleted seller" : "@" + review.getSellerUsername();
+        Label parties = new Label(seller + " by " + RatingDisplay.buyerName(review.getBuyerUsername())
                 + (review.isHidden() ? "  (hidden)" : ""));
-        stars.setStyle("-fx-font-weight: bold;");
+        parties.setStyle(RatingDisplay.META_STYLE);
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         Button hide = new Button(review.isHidden() ? "Unhide" : "Hide");
@@ -1267,7 +1272,7 @@ public class AdminDashboardController {
         if (!review.isHidden()) {
             hide.setOnAction(event -> hideReview(review, review.isHidden(),reloadAction));
         }
-        HBox titleRow = new HBox(10, stars, spacer, hide);
+        HBox titleRow = new HBox(10, stars, parties, spacer, hide);
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
         Label comment = new Label(review.getComment());

@@ -7,7 +7,6 @@ import javafx.concurrent.Task;
 import javafx.scene.control.*;
 import javafx.scene.layout.VBox;
 import java.sql.SQLException;
-import java.util.Locale;
 
 /** Public feedback shared by listing details and seller profiles. */
 public final class SellerProfilePane extends VBox {
@@ -72,13 +71,25 @@ public final class SellerProfilePane extends VBox {
             getChildren().add(profileButton(username));
         }
         var average = seller.average();
-        addText(average.isEmpty() ? "No seller ratings yet." : String.format(Locale.ENGLISH,
-                "Seller rating: %.1f / 5 (%d)", average.getAsDouble(), seller.reviews().size()));
+        Label summary = new Label(average.isEmpty() ? "No ratings yet"
+                : RatingDisplay.average(average.getAsDouble(), seller.reviews().size()));
+        summary.setStyle(RatingDisplay.SUMMARY_STYLE);
+        getChildren().add(summary);
         for (Review review : seller.reviews()) {
-            String author = review.getBuyerUsername() == null ? "Deleted buyer" : "@" + review.getBuyerUsername();
-            addText(review.getRating() + "/5 · " + author + " · " + review.getListingTitle());
-            addText(review.getComment());
-            if (review.getSellerReply() != null) addText("Seller reply: " + review.getSellerReply());
+            Label meta = new Label(RatingDisplay.buyerName(review.getBuyerUsername()) + " · " + review.getListingTitle());
+            meta.setWrapText(true);
+            meta.setStyle(RatingDisplay.META_STYLE);
+            Label comment = new Label(review.getComment());
+            comment.setWrapText(true);
+            VBox card = new VBox(4, RatingDisplay.stars(review.getRating()), meta, comment);
+            card.getStyleClass().add("card");
+            if (review.getSellerReply() != null) {
+                Label reply = new Label("Seller reply: " + review.getSellerReply());
+                reply.setWrapText(true);
+                reply.setStyle("-fx-text-fill: #5a5a7a;");
+                card.getChildren().add(reply);
+            }
+            getChildren().add(card);
         }
     }
 

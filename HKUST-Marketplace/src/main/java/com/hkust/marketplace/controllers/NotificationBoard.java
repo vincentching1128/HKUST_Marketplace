@@ -45,7 +45,11 @@ public class NotificationBoard extends ScrollPane {
         Button refresh = new Button("Refresh");
         refresh.getStyleClass().add("btn-outline");
         refresh.setOnAction(event -> show(recipient));
-        root.getChildren().add(new HBox(12, refresh, history));
+        Button readAll = new Button("Mark all as read");
+        readAll.getStyleClass().add("btn-outline");
+        readAll.setDisable(true);
+        readAll.setOnAction(event -> saveRead(recipient, readAll, () -> notifications.markAllAsRead(recipient)));
+        root.getChildren().add(new HBox(12, refresh, readAll, history));
         VBox inbox = new VBox(12, new Label("Loading notifications..."), new ProgressIndicator());
         root.getChildren().add(inbox);
         setContent(root);
@@ -57,6 +61,7 @@ public class NotificationBoard extends ScrollPane {
         load.setOnSucceeded(event -> {
             if (!currentNotificationRequest(request, recipient)) return;
             inbox.getChildren().clear();
+            readAll.setDisable(load.getValue().stream().allMatch(Notification::isRead));
             if (load.getValue().isEmpty()) {
                 inbox.getChildren().add(new Label(includeRead ? "No notifications." : "No unread notifications."));
             }
@@ -103,28 +108,34 @@ public class NotificationBoard extends ScrollPane {
         Button read = new Button(notification.isRead() ? "Read" : "Mark as read");
         read.getStyleClass().addAll("btn-outline", "btn-sm");
         read.setDisable(notification.isRead());
-        read.setOnAction(event -> {
-            long request = notificationRequest;
-            read.setDisable(true);
-            Task<Boolean> save = new Task<>() {
-                @Override protected Boolean call() throws SQLException {
-                    return notifications.markAsRead(recipient, notification.getId());
-                }
-            };
-            save.setOnSucceeded(done -> {
-                if (isActiveFor(recipient)) show(recipient);
-            });
-            save.setOnFailed(done -> {
-                if (!currentNotificationRequest(request, recipient)) return;
-                read.setDisable(false);
-                new Alert(Alert.AlertType.ERROR, "Unable to mark this notification as read. Please try again.").showAndWait();
-            });
-            Thread thread = new Thread(save, "notification-read");
-            thread.setDaemon(true);
-            thread.start();
-        });
+        read.setOnAction(event -> saveRead(recipient, read, () -> notifications.markAsRead(recipient, notification.getId())));
         VBox item = new VBox(6, title, message, new HBox(12, meta, read));
         item.getStyleClass().add("notif-item");
         return item;
+    }
+
+    @FunctionalInterface
+    private interface ReadAction { void run() throws SQLException; }
+
+    private void saveRead(User recipient, Button read, ReadAction action) {
+        long request = notificationRequest;
+        read.setDisable(true);
+        Task<Void> save = new Task<>() {
+            @Override protected Void call() throws SQLException {
+                action.run();
+                return null;
+            }
+        };
+        save.setOnSucceeded(done -> {
+            if (isActiveFor(recipient)) show(recipient);
+        });
+        save.setOnFailed(done -> {
+            if (!currentNotificationRequest(request, recipient)) return;
+            read.setDisable(false);
+            new Alert(Alert.AlertType.ERROR, "Unable to update notifications. Please try again.").showAndWait();
+        });
+        Thread thread = new Thread(save, "notification-read");
+        thread.setDaemon(true);
+        thread.start();
     }
 }

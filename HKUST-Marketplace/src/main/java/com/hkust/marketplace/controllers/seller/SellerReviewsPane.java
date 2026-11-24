@@ -1,5 +1,7 @@
 package com.hkust.marketplace.controllers.seller;
 
+import com.hkust.marketplace.controllers.RatingDisplay;
+
 import com.hkust.marketplace.models.Review;
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.services.ReviewService;
@@ -60,21 +62,20 @@ final class SellerReviewsPane extends ScrollPane {
     }
 
     private void render(List<Review> reviews) {
-        var average = reviews.stream().filter(review -> !review.isHidden()).mapToInt(Review::getRating).average();
-        summary.setText(average.isPresent()
-                ? String.format(Locale.ENGLISH, "Average rating: %.1f / 5", average.getAsDouble())
-                : "No visible ratings yet");
+        var ratings = reviews.stream().filter(review -> !review.isHidden()).mapToInt(Review::getRating).summaryStatistics();
+        summary.setText(ratings.getCount() == 0 ? "No ratings yet"
+                : RatingDisplay.average(ratings.getAverage(), ratings.getCount()));
+        summary.setStyle(RatingDisplay.SUMMARY_STYLE);
         items.getChildren().clear();
         if (reviews.isEmpty()) items.getChildren().add(new Label("No reviews yet."));
         reviews.forEach(review -> items.getChildren().add(reviewCard(review)));
     }
 
     private VBox reviewCard(Review review) {
-        Label stars = new Label("\u2605".repeat(review.getRating()) + "\u2606".repeat(5 - review.getRating())
-                + "  " + review.getRating() + "/5");
-        stars.setStyle("-fx-text-fill: #A68137; -fx-font-size: 16px;");
-        Label meta = new Label("@" + review.getBuyerUsername() + " · " + review.getListingTitle()
+        Label stars = RatingDisplay.stars(review.getRating());
+        Label meta = new Label(RatingDisplay.buyerName(review.getBuyerUsername()) + " · " + review.getListingTitle()
                 + " · " + review.getCreatedAt().format(DATE));
+        meta.setStyle(RatingDisplay.META_STYLE);
         meta.setWrapText(true);
         Label comment = new Label(review.getComment());
         comment.setWrapText(true);
