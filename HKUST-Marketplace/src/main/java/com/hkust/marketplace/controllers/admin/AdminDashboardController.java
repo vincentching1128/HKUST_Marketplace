@@ -1265,13 +1265,10 @@ public class AdminDashboardController {
         HBox.setHgrow(spacer, Priority.ALWAYS);
         Button hide = new Button(review.isHidden() ? "Unhide" : "Hide");
         hide.getStyleClass().addAll("btn-outline", "btn-sm");
-        hide.setDisable(review.isHidden());
         hide.setTooltip(new Tooltip(review.isHidden()
                 ? "This review is hidden from sellers and buyers."
                 : "Hide this review from sellers and buyers."));
-        if (!review.isHidden()) {
-            hide.setOnAction(event -> hideReview(review, review.isHidden(),reloadAction));
-        }
+        hide.setOnAction(event -> hideReview(review, review.isHidden(), reloadAction));
         HBox titleRow = new HBox(10, stars, parties, spacer, hide);
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
