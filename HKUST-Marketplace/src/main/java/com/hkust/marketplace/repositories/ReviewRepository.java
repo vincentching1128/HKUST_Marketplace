@@ -162,12 +162,22 @@ public class ReviewRepository {
         }
     }
 
-    public void setHidden(Connection connection, String reviewId, boolean hidden) throws SQLException {
+    /** Updates the visibility opposite to the supplied current hidden state. */
+    public boolean hide(String reviewId, Boolean hidden) throws SQLException {
+        if (reviewId == null || reviewId.isBlank()) {
+            throw new IllegalArgumentException("A review ID is required.");
+        }
+        try (Connection connection = DatabaseManager.getConnection()) {
+            return setHidden(connection, reviewId, !hidden);
+        }
+    }
+
+    public boolean setHidden(Connection connection, String reviewId, boolean hidden) throws SQLException {
         String sql = "UPDATE reviews SET hidden = ? WHERE id = ?";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setBoolean(1, hidden);
             statement.setString(2, reviewId);
-            statement.executeUpdate();
+            return statement.executeUpdate() > 0;
         }
     }
 
