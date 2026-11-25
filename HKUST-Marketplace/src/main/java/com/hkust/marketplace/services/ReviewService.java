@@ -94,7 +94,11 @@ public class ReviewService {
     public void flag(User seller, String reviewId) throws SQLException {
         inTransaction(connection -> {
             Review review = requireSellerReview(connection, seller, reviewId);
-            if (!review.isFlagged()) reviews.flag(connection, reviewId);
+            if (review.isFlagged()) return;
+            reviews.flag(connection, reviewId);
+            notifications.notifyAllAdmins(connection, "Review", "Seller Flagged a Review",
+                    "@" + review.getSellerUsername() + " flagged the review by @" + review.getBuyerUsername()
+                            + " for '" + review.getListingTitle() + "'. Open Seller Ratings to moderate it.");
         });
     }
 

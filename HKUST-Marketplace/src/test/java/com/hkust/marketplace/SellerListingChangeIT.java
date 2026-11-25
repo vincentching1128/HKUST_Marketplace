@@ -7,6 +7,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SellerListingChangeIT extends MySqlFixture {
     @Test
+    void completedDealAndConversationRemainAccessibleAfterAdminTakedown() throws Exception {
+        String listingId = live(ListingType.SELL).getId();
+        Deal deal = buys.submit(buyer, listingId, ListingType.SELL, 35.0, null, null);
+        var thread = chat.openForDeal(buyer, deal.getId());
+        var message = chat.sendMessage(buyer, thread.id(), "Meet at the library");
+        offers.acceptOffer(seller, deal.getId(), deal.getRowVersion());
+        buys.complete(buyer, deal.getId(), buys.getMyDeal(buyer, deal.getId()).getRowVersion());
+
+        assertTrue(listings.removeListingAsAdmin(admin, listingId, seller.getUsername(), "Test takedown"));
+        assertThrows(IllegalArgumentException.class, () -> browse.getListing(buyer, listingId));
+        assertTrue(buys.getHistory(buyer).stream().anyMatch(entry -> entry.dealId().equals(deal.getId())));
+        assertEquals(DealStatus.COMPLETED, offers.getSellerDeal(seller, deal.getId()).getStatus());
+        for (User participant : java.util.List.of(buyer, seller)) {
+            assertTrue(chat.getInbox(participant).stream().anyMatch(entry -> entry.id().equals(thread.id())));
+            assertEquals(thread.id(), chat.openForDeal(participant, deal.getId()).id());
+            assertTrue(chat.getConversation(participant, thread.id(), "library").messages().stream()
+                    .anyMatch(entry -> entry.id() == message.id()));
+        }
+    }
+
+    @Test
     void acceptedCounterIsShownOnCardAndDetailsThroughCompletion() throws Exception {
         Listing item = draft(ListingType.SELL);
         item.setPrice(100.0);

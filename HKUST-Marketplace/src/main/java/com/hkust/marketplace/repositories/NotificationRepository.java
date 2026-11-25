@@ -180,21 +180,26 @@ public class NotificationRepository {
      * @return the number of admin notifications created
      */
     public int notifyAllAdmins(String category, String title, String message) throws SQLException {
+        try (Connection conn = DatabaseManager.getConnection()) {
+            return notifyAllAdmins(conn, category, title, message);
+        }
+    }
+
+    public int notifyAllAdmins(Connection conn, String category, String title, String message) throws SQLException {
         String safeCategory = requiredText(category, "A notification category", MAX_CATEGORY);
         String safeTitle = requiredText(title, "A notification title", MAX_TITLE);
         String safeMessage = requiredText(message, "A notification message", MAX_MESSAGE);
 
         List<String> admins = new ArrayList<>();
         String sql = "SELECT username FROM users WHERE role = 'ADMIN' AND active = TRUE ORDER BY username";
-        try (Connection conn = DatabaseManager.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql);
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
             while (rs.next()) {
                 admins.add(rs.getString("username"));
             }
         }
         for (String admin : admins) {
-            create(new Notification(admin, safeTitle, safeMessage, safeCategory));
+            create(conn, new Notification(admin, safeTitle, safeMessage, safeCategory));
         }
         return admins.size();
     }

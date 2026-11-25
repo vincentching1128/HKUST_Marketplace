@@ -1269,7 +1269,13 @@ public class AdminDashboardController {
                 ? "This review is hidden from sellers and buyers."
                 : "Hide this review from sellers and buyers."));
         hide.setOnAction(event -> hideReview(review, review.isHidden(), reloadAction));
-        HBox titleRow = new HBox(10, stars, parties, spacer, hide);
+        HBox titleRow = new HBox(10, stars, parties);
+        if (review.isFlagged()) {
+            Label badge = new Label("FLAGGED");
+            badge.getStyleClass().addAll("badge", "badge-rejected");
+            titleRow.getChildren().add(badge);
+        }
+        titleRow.getChildren().addAll(spacer, hide);
         titleRow.setAlignment(Pos.CENTER_LEFT);
 
         Label comment = new Label(review.getComment());
@@ -1280,8 +1286,7 @@ public class AdminDashboardController {
                 ? "unknown listing" : review.getListingTitle();
         Label meta = new Label("Listing: " + listingTitle + " · "
                 + (review.getCreatedAt() == null ? "unknown date"
-                : review.getCreatedAt().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.ENGLISH)))
-                + (review.isFlagged() ? " · flagged" : ""));
+                : review.getCreatedAt().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.ENGLISH))));
         meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
 
         row.getChildren().addAll(titleRow, comment, meta);

@@ -195,7 +195,8 @@ public class ListingRepository {
         String sql = LISTINGS_WITH_DEAL + """
                 WHERE l.seller_username = ?
                   AND l.listingStatus <> 'REMOVED'
-                ORDER BY l.posted_at DESC, l.id DESC
+                ORDER BY CASE WHEN l.listingStatus IN ('SOLD', 'GIVEN', 'LENT') THEN 1 ELSE 0 END,
+                         l.posted_at DESC, l.id DESC
                 """;
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
