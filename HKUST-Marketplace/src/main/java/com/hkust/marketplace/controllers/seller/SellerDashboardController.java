@@ -33,6 +33,7 @@ import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
+import javafx.stage.Window;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -400,6 +401,14 @@ public class SellerDashboardController {
         showListingForm(null);
     }
 
+    protected List<File> choosePhotoFiles(Window owner) {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Choose up to 6 listing photos");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+                "Images (PNG, JPEG, GIF)", "*.png", "*.jpg", "*.jpeg", "*.gif"));
+        return chooser.showOpenMultipleDialog(owner);
+    }
+
     //use one form for both actions so validation and photo handling stay consistent
     private void showListingForm(Listing existing) {
         boolean editing = existing != null;
@@ -469,11 +478,7 @@ public class SellerDashboardController {
         Button choosePhotos = new Button("Choose Photos");
         choosePhotos.getStyleClass().add("btn-outline");
         choosePhotos.setOnAction(event -> {
-            FileChooser chooser = new FileChooser();
-            chooser.setTitle("Choose up to 6 listing photos");
-            chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
-                    "Images (PNG, JPEG, GIF)", "*.png", "*.jpg", "*.jpeg", "*.gif"));
-            List<File> files = chooser.showOpenMultipleDialog(contentPane.getScene().getWindow());
+            List<File> files = choosePhotoFiles(contentPane.getScene().getWindow());
             if (files == null) return;
             //new selections are added to the photos already chosen
             if (selectedPhotos.size() + files.size() > 6) {

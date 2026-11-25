@@ -1,4 +1,4 @@
-package com.hkust.marketplace.services;
+package com.hkust.marketplace.testcase;
 
 import com.hkust.marketplace.controllers.NotificationBoard;
 import com.hkust.marketplace.controllers.SellerProfilePane;
@@ -19,6 +19,9 @@ import com.hkust.marketplace.repositories.ListingRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.repositories.ReviewRepository;
 import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.ListingService;
+import com.hkust.marketplace.services.PasswordHasher;
 import com.hkust.marketplace.utils.DatabaseManager;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
@@ -97,7 +100,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * and {@link AdminDashboardController}.
  *
  * <p>File Placement:
- * {@code HKUST-Marketplace/src/test/java/com/hkust/marketplace/test/AdminFrontendControllerTest.java}
+ * {@code HKUST-Marketplace/src/test/java/com/hkust/marketplace/testcase/AdminFrontendControllerTest.java}
  *
  * <p>How to Run:
  * <ol>

@@ -1,4 +1,4 @@
-package com.hkust.marketplace.services;
+package com.hkust.marketplace.testcase;
 
 import com.hkust.marketplace.models.ChatThread;
 import com.hkust.marketplace.models.Deal;
@@ -18,6 +18,11 @@ import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.repositories.ReviewRepository;
 import com.hkust.marketplace.repositories.SellerStatsRepository;
 import com.hkust.marketplace.repositories.UserRepository;
+import com.hkust.marketplace.services.AuthService;
+import com.hkust.marketplace.services.BuyerListingService;
+import com.hkust.marketplace.services.ListingService;
+import com.hkust.marketplace.services.NotificationService;
+import com.hkust.marketplace.services.PasswordHasher;
 import com.hkust.marketplace.utils.DatabaseManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
@@ -52,7 +57,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Automated JUnit 5 Integration & Functional Test Suite for Task 3: Admin Portal.
  *
  * <p>File Placement:
- * {@code HKUST-Marketplace/src/test/java/com/hkust/marketplace/test/AdminPortalTest.java}
+ * {@code HKUST-Marketplace/src/test/java/com/hkust/marketplace/testcase/AdminPortalTest.java}
  *
  * <p>How to Execute:
  * <ol>
@@ -64,8 +69,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>Ensure JDK 21 is active (matches {@code pom.xml} {@code maven.compiler.release=21}).</li>
  *   <li>Run:
  *       <ul>
- *         <li>Windows PowerShell: {@code .\mvnw.cmd test -Dtest=com.hkust.marketplace.test.AdminPortalTest}</li>
- *         <li>macOS / Linux: {@code ./mvnw test -Dtest=com.hkust.marketplace.test.AdminPortalTest}</li>
+ *         <li>Windows PowerShell: {@code .\mvnw.cmd test -Dtest=com.hkust.marketplace.testcase.AdminPortalTest}</li>
+ *         <li>macOS / Linux: {@code ./mvnw test -Dtest=com.hkust.marketplace.testcase.AdminPortalTest}</li>
  *       </ul>
  *   </li>
  * </ol>
@@ -136,7 +141,7 @@ public class AdminPortalTest {
     @BeforeAll
     static void verifyDatabaseConnection() {
         try (Connection conn = DatabaseManager.getConnection()) {
-            assertNotNull(conn, "MySQL connection must be available before running com.hkust.marketplace.test.AdminPortalTest.");
+            assertNotNull(conn, "MySQL connection must be available before running AdminPortalTest.");
         } catch (SQLException ex) {
             throw new IllegalStateException(
                     "Cannot connect to MySQL hkust_marketplace database. "

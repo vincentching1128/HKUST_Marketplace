@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Owns a local MySQL 8 process. Every test gets the production schema and seed in a fresh database. */
-abstract class MySqlFixture {
+public abstract class MySqlFixture {
     @TempDir static Path work;
     private static Process server;
     private static String serverUrl;
