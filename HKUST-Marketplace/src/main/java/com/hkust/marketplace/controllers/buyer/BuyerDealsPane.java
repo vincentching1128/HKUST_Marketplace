@@ -4,6 +4,7 @@ import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.services.BuyerDealService;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
@@ -11,13 +12,14 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /** Real buyer proposals and deals, including terminal records. */
 public class BuyerDealsPane extends VBox {
-    private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm:ss");
+    private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.ENGLISH);
     private final BuyerDealService service;
     private final Supplier<User> user;
     private final Consumer<String> openListing;
@@ -44,7 +46,11 @@ public class BuyerDealsPane extends VBox {
         ScrollPane scroll = new ScrollPane(rows);
         scroll.setFitToWidth(true);
         VBox.setVgrow(scroll, Priority.ALWAYS);
-        getChildren().addAll(refresh, feedback, scroll);
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox toolbar = new HBox(8, spacer, refresh);
+        toolbar.setAlignment(Pos.CENTER_RIGHT);
+        getChildren().addAll(toolbar, feedback, scroll);
     }
 
     public void deactivate() { active = false; request++; }
@@ -77,55 +83,91 @@ public class BuyerDealsPane extends VBox {
         start(task, "buyer-deals-load");
     }
 
-    private VBox card(Deal deal) {
+    private HBox card(Deal deal) {
         Label title = new Label(deal.getListingTitle());
         title.setWrapText(true);
         title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
-        VBox card = new VBox(9, title,
-                new Label((deal.getSellerUsername() == null ? "Deleted seller" : "Seller: @" + deal.getSellerUsername())
-                        + "  |  " + deal.getDealType() + "  |  " + deal.getStatus().getDisplayName()),
-                new Label("Submitted: " + format(deal.getCreatedAt())));
-        card.getStyleClass().add("card");
-        card.setPadding(new Insets(18));
-        String agreedTerms = deal.agreedTermsDisplay();
-        if (!agreedTerms.isEmpty()) {
-            card.getChildren().add(new Label(agreedTerms));
-            if (deal.getStatus() == DealStatus.ACCEPTED && deal.getDealType() == ListingType.LEND) {
-                card.getChildren().add(new Label("Due: " + format(deal.getBorrowEnd())));
-            }
-        } else if (deal.getDealType() == ListingType.SELL) {
-            card.getChildren().add(new Label(String.format(java.util.Locale.ENGLISH, "Your offer: HK$ %.2f", deal.getOfferPrice())));
-        } else if (deal.getDealType() == ListingType.LEND) {
-            card.getChildren().add(new Label("Requested period: " + format(deal.getBorrowStart()) + " to " + format(deal.getBorrowEnd())));
-        }
+        Label type = badge(switch (deal.getDealType()) {
+            case SELL -> "Sell";
+            case LEND -> "Lend";
+            case GIVEAWAY -> "Give Away";
+        }, "badge-deal-type");
+        Label status = badge(deal.getStatus().getDisplayName(), switch (deal.getStatus()) {
+            case COMPLETED, RETURNED -> "badge-live";
+            case PENDING, COUNTERED -> "badge-deal-pending";
+            case ACCEPTED -> "badge-sold";
+            case DECLINED, CANCELLED -> "badge-rejected";
+        });
+        HBox heading = new HBox(8, title, type, status);
+        heading.setAlignment(Pos.CENTER_LEFT);
+        String seller = deal.getSellerUsername() == null ? "Deleted seller" : "@" + deal.getSellerUsername();
+        Label metadata = new Label("Seller: " + seller + " · " + format(deal.getCreatedAt()));
+        metadata.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 12px;");
+        metadata.setWrapText(true);
+        Label terms = new Label(termsSummary(deal));
+        terms.setStyle("-fx-text-fill: #003974; -fx-font-weight: bold;");
+        terms.setWrapText(true);
+        VBox details = new VBox(4, heading, metadata, terms);
+        HBox.setHgrow(details, Priority.ALWAYS);
+
+        HBox actions = new HBox(8);
+        actions.setAlignment(Pos.CENTER_RIGHT);
+        actions.getChildren().add(button("View Listing", "btn-outline", () -> openListing.accept(deal.getListingId())));
+        actions.getChildren().add(button("Open Chat", "btn-outline", () -> openChat.accept(deal.getId())));
         if (deal.getStatus() == DealStatus.COUNTERED) {
-            card.getChildren().add(new Label(deal.getDealType() == ListingType.SELL
-                    ? "Seller counteroffer: HK$" + deal.getCounterOfferPrice()
-                    : "Seller proposed: " + format(deal.getCounterBorrowStart()) + " to " + format(deal.getCounterBorrowEnd())));
-        }
-        FlowPane actions = new FlowPane(10, 10);
-        actions.getChildren().add(button("View Listing", () -> openListing.accept(deal.getListingId())));
-        actions.getChildren().add(button("Open Chat", () -> openChat.accept(deal.getId())));
-        if (deal.getStatus() == DealStatus.COUNTERED) {
-            actions.getChildren().add(button("Accept Counter", () -> act(deal, service::acceptCounter, "Counteroffer accepted.", this::refresh)));
-            actions.getChildren().add(button("Decline Counter", () -> act(deal, service::declineCounter, "Counteroffer declined.", this::refresh)));
+            actions.getChildren().add(button("Accept Counter", "btn-primary",
+                    () -> act(deal, service::acceptCounter, "Counteroffer accepted.", this::refresh)));
+            actions.getChildren().add(button("Decline Counter", "btn-outline",
+                    () -> act(deal, service::declineCounter, "Counteroffer declined.", this::refresh)));
         }
         if (deal.getStatus() == DealStatus.ACCEPTED) {
             if (deal.getDealType() == ListingType.LEND) {
-                Button giveBack = button("Self Return", () -> act(deal, service::returnBorrowed,
+                Button giveBack = button("Return Item", "btn-primary", () -> act(deal, service::returnBorrowed,
                         "Borrowing returned.", () -> openHistory.accept(deal.getId())));
                 giveBack.setDisable(deal.getBorrowStart() == null || LocalDateTime.now().isBefore(deal.getBorrowStart()));
                 actions.getChildren().add(giveBack);
             } else {
-                actions.getChildren().add(button("Mark Complete", () -> act(deal, service::complete,
+                actions.getChildren().add(button("Mark Complete", "btn-primary", () -> act(deal, service::complete,
                         "Deal completed.", () -> openHistory.accept(deal.getId()))));
             }
         }
         if (deal.getStatus() == DealStatus.RETURNED || deal.getStatus() == DealStatus.COMPLETED) {
-            actions.getChildren().add(button("Review in Deal History", () -> openHistory.accept(deal.getId())));
+            actions.getChildren().add(button("Review in Deal History", "btn-primary", () -> openHistory.accept(deal.getId())));
         }
-        card.getChildren().add(actions);
+        HBox card = new HBox(12, details, actions);
+        card.setAlignment(Pos.CENTER_LEFT);
+        card.getStyleClass().add("card");
+        card.setStyle("-fx-padding: 14;");
         return card;
+    }
+
+    private static Label badge(String text, String style) {
+        Label badge = new Label(text);
+        badge.getStyleClass().addAll("badge", style);
+        badge.setMinWidth(Region.USE_PREF_SIZE);
+        return badge;
+    }
+
+    private static String termsSummary(Deal deal) {
+        if (deal.getDealType() == ListingType.GIVEAWAY) return "Free";
+        DealStatus status = deal.getStatus();
+        boolean agreed = status == DealStatus.ACCEPTED || status == DealStatus.COMPLETED || status == DealStatus.RETURNED;
+        if (deal.getDealType() == ListingType.SELL) {
+            String offer = (agreed ? "Agreed: " : "Your offer: ") + price(deal.getOfferPrice());
+            return status == DealStatus.COUNTERED
+                    ? offer + " · Seller counteroffer: " + price(deal.getCounterOfferPrice()) : offer;
+        }
+
+        String start = format(deal.getBorrowStart());
+        String end = format(deal.getBorrowEnd());
+        if (status == DealStatus.ACCEPTED) return "Borrowing: " + start + " · Due: " + end;
+        String period = (agreed ? "Borrowing: " : "Requested period: ") + start + " – " + end;
+        return status == DealStatus.COUNTERED ? period + " · Seller proposed: "
+                + format(deal.getCounterBorrowStart()) + " – " + format(deal.getCounterBorrowEnd()) : period;
+    }
+
+    private static String price(Double amount) {
+        return amount == null ? "—" : String.format(Locale.ENGLISH, "HK$ %.2f", amount);
     }
 
     @FunctionalInterface private interface Action { void run(User buyer, String id, long version) throws SQLException; }
@@ -154,9 +196,10 @@ public class BuyerDealsPane extends VBox {
         start(task, "buyer-deal-action");
     }
 
-    private Button button(String label, Runnable action) {
+    private Button button(String label, String style, Runnable action) {
         Button button = new Button(label);
-        button.getStyleClass().add("btn-outline");
+        button.getStyleClass().addAll(style, "btn-sm");
+        button.setMinWidth(Region.USE_PREF_SIZE);
         button.setOnAction(event -> action.run());
         return button;
     }

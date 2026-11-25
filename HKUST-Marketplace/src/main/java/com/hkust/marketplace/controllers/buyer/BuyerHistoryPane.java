@@ -9,6 +9,7 @@ import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.concurrent.Task;
+import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.util.Duration;
@@ -22,12 +23,12 @@ import java.util.Objects;
 import java.util.function.Function;
 
 final class BuyerHistoryPane extends VBox {
-    private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm:ss", Locale.ENGLISH);
+    private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm", Locale.ENGLISH);
     private final User buyer;
     private final BuyerDealService service;
     private final DatePicker from = datePicker("From");
     private final DatePicker to = datePicker("To");
-    private final TextField seller = new TextField();
+    private final TextField searchField = new TextField();
     private final ComboBox<String> category = new ComboBox<>();
     private final TableView<DealHistoryEntry> table = new TableView<>();
     private final VBox review = new VBox(6);
@@ -42,28 +43,55 @@ final class BuyerHistoryPane extends VBox {
         this.buyer = buyer;
         this.service = service;
         this.requestedDeal = requestedDeal;
-        seller.setPromptText("Seller name or username");
+        searchField.setPromptText("Search item title or seller...");
+        searchField.setAccessibleText("Search by item title, seller name, or seller username");
+        searchField.setPrefWidth(225);
         category.setPromptText("All categories");
         Button reset = new Button("Clear filters");
+        reset.getStyleClass().addAll("btn-outline", "btn-sm");
         reset.setOnAction(event -> {
             from.setValue(null);
             to.setValue(null);
-            seller.clear();
+            searchField.clear();
             category.setValue(null);
         });
-        getChildren().add(new FlowPane(8, 8, from, to, category, seller, reset));
-        column("Item Title", DealHistoryEntry::title);
-        column("Seller", DealHistoryEntry::sellerDisplay);
-        column("Deal Date", row -> row.closedAt() == null ? "Unknown" : DATE.format(row.closedAt()));
-        column("Deal Type", row -> row.type().charAt(0) + row.type().substring(1).toLowerCase(Locale.ROOT));
-        column("Agreed terms", row -> "RECEIVED".equals(row.type()) ? "Free" : row.agreedTerms().display());
+        HBox filters = new HBox(8, from, new Label("to"), to, category, searchField, reset);
+        filters.setAlignment(Pos.CENTER_LEFT);
+        getChildren().add(filters);
+        var title = column("Item Title", DealHistoryEntry::title);
+        title.setPrefWidth(135);
+        title.setCellFactory(ignored -> cellWithTooltip());
+        var seller = column("Seller", DealHistoryEntry::sellerDisplay);
+        seller.setPrefWidth(125);
+        seller.setCellFactory(ignored -> cellWithTooltip());
+        column("Deal Date", row -> row.closedAt() == null ? "Unknown" : DATE.format(row.closedAt())).setPrefWidth(145);
+        column("Deal Type", BuyerHistoryPane::dealType);
+        var terms = column("Agreed terms", BuyerHistoryPane::termsText);
+        terms.setPrefWidth(185);
+        terms.setCellFactory(ignored -> cellWithTooltip());
         column("Outcome", row -> row.outcome().getDisplayName());
+        table.getStyleClass().add("deal-history-table");
+        table.setFixedCellSize(30);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         table.setPlaceholder(new Label("No finished deals match these filters."));
+        table.setRowFactory(ignored -> {
+            TableRow<DealHistoryEntry> row = new TableRow<>();
+            row.setOnMouseClicked(event -> {
+                if (row.isEmpty()) table.getSelectionModel().clearSelection();
+            });
+            return row;
+        });
+        VBox details = createDetailStrip();
+        setOnMouseClicked(event -> {
+            Object target = event.getTarget();
+            if (target == this || target == filters || target == details || target == review) {
+                table.getSelectionModel().clearSelection();
+            }
+        });
         table.getSelectionModel().selectedItemProperty().addListener((obs, old, row) -> showReview(row));
         VBox.setVgrow(table, Priority.ALWAYS);
-        getChildren().addAll(status, table, review);
-        seller.textProperty().addListener((obs, old, value) -> applyFilters());
+        getChildren().addAll(status, table, details, review);
+        searchField.textProperty().addListener((obs, old, value) -> applyFilters());
         category.valueProperty().addListener((obs, old, value) -> applyFilters());
         from.valueProperty().addListener((obs, old, value) -> applyFilters());
         to.valueProperty().addListener((obs, old, value) -> applyFilters());
@@ -83,15 +111,69 @@ final class BuyerHistoryPane extends VBox {
     private static DatePicker datePicker(String prompt) {
         DatePicker picker = new DatePicker();
         picker.setPromptText(prompt);
+        picker.setAccessibleText(prompt + " deal date");
+        picker.setPrefWidth(135);
         picker.setEditable(false);
         return picker;
     }
 
-    private void column(String title, Function<DealHistoryEntry, String> value) {
+    private TableColumn<DealHistoryEntry, String> column(String title, Function<DealHistoryEntry, String> value) {
         TableColumn<DealHistoryEntry, String> column = new TableColumn<>(title);
         column.setSortable(false);
         column.setCellValueFactory(cell -> new ReadOnlyStringWrapper(value.apply(cell.getValue())));
         table.getColumns().add(column);
+        return column;
+    }
+
+    private VBox createDetailStrip() {
+        var selected = table.getSelectionModel().selectedItemProperty();
+        Label heading = new Label();
+        heading.setStyle("-fx-font-weight: bold;");
+        heading.setWrapText(true);
+        heading.textProperty().bind(selected.map(row -> row.title() + " · " + row.category() + " · "
+                + dealType(row) + " (" + row.outcome().getDisplayName() + ")"));
+        Label summary = new Label();
+        summary.setStyle("-fx-text-fill: #5a5a7a;");
+        summary.setWrapText(true);
+        summary.textProperty().bind(selected.map(row -> "Seller: " + row.sellerDisplay()
+                + " · Date: " + (row.closedAt() == null ? "Unknown" : DATE.format(row.closedAt()))
+                + " · Agreed terms: " + termsText(row)));
+        VBox details = new VBox(4, heading, summary);
+        details.getStyleClass().add("card");
+        details.setStyle("-fx-padding: 8 12;");
+        var hasSelection = selected.isNotNull();
+        details.visibleProperty().bind(hasSelection);
+        details.managedProperty().bind(hasSelection);
+        return details;
+    }
+
+    private static TableCell<DealHistoryEntry, String> cellWithTooltip() {
+        return new TableCell<>() {
+            private final Tooltip fullText = new Tooltip();
+
+            @Override
+            protected void updateItem(String value, boolean empty) {
+                super.updateItem(value, empty);
+                String text = empty ? null : value;
+                setText(text == null ? null : text.replace('\r', ' ').replace('\n', ' '));
+                fullText.setText(text);
+                setTooltip(text == null ? null : fullText);
+            }
+        };
+    }
+
+    private static String dealType(DealHistoryEntry row) {
+        return row.type().charAt(0) + row.type().substring(1).toLowerCase(Locale.ROOT);
+    }
+
+    private static String termsText(DealHistoryEntry row) {
+        if ("RECEIVED".equals(row.type())) return "Free";
+        var terms = row.agreedTerms();
+        if (terms.price() != null) return String.format(Locale.ENGLISH, "HK$ %.2f", terms.price());
+        if (terms.start() != null && terms.due() != null) {
+            return DATE.format(terms.start()) + " – " + DATE.format(terms.due());
+        }
+        return "Terms unavailable";
     }
 
     private void reload() {
@@ -134,13 +216,14 @@ final class BuyerHistoryPane extends VBox {
     private void applyFilters() {
         LocalDate start = from.getValue(), end = to.getValue();
         boolean invalid = start != null && end != null && start.isAfter(end);
-        String search = seller.getText().strip().toLowerCase(Locale.ROOT);
+        String search = searchField.getText().strip().toLowerCase(Locale.ROOT);
         List<DealHistoryEntry> matches = history.stream().filter(row -> {
             LocalDate date = row.closedAt() == null ? null : row.closedAt().toLocalDate();
             return !invalid && (start == null || date != null && !date.isBefore(start))
                     && (end == null || date != null && !date.isAfter(end))
                     && (category.getValue() == null || category.getValue().equals(row.category()))
-                    && row.sellerDisplay().toLowerCase(Locale.ROOT).contains(search);
+                    && (row.title().toLowerCase(Locale.ROOT).contains(search)
+                        || row.sellerDisplay().toLowerCase(Locale.ROOT).contains(search));
         }).toList();
         table.setPlaceholder(new Label(invalid ? "Choose an end date on or after the start date."
                 : "No finished deals match these filters."));
@@ -157,6 +240,7 @@ final class BuyerHistoryPane extends VBox {
         if (row == null) return;
         if (row.canReview()) {
             Button rate = new Button("Rate Seller");
+            rate.getStyleClass().add("btn-primary");
             rate.setOnAction(event -> writeReview(row));
             review.getChildren().add(rate);
         } else if (row.rating() != null) {

@@ -102,6 +102,28 @@ public class ReviewService {
         });
     }
 
+    public void setHidden(User admin, String reviewId, boolean hidden) throws SQLException {
+        inTransaction(connection -> {
+            requireRole(connection, admin, UserRole.ADMIN);
+            Review review = reviews.findForModeration(connection, reviewId);
+            if (review == null) throw new IllegalArgumentException("This review no longer exists.");
+            if (review.isHidden() == hidden) return;
+            reviews.setHidden(connection, reviewId, hidden);
+            if (!hidden) return;
+
+            String item = "'" + review.getListingTitle() + "'";
+            if (review.getBuyerUsername() != null) {
+                notifications.create(connection, new Notification(review.getBuyerUsername(), "Your Review Was Hidden",
+                        "An admin hid your review for " + item
+                                + " from public view. You can still see it in Deal History.", "Review"));
+            }
+            if (review.getSellerUsername() != null) {
+                notifications.create(connection, new Notification(review.getSellerUsername(), "A Seller Review Was Hidden",
+                        "An admin hid a review you received for " + item + " from public view.", "Review"));
+            }
+        });
+    }
+
     private Review requireSellerReview(Connection connection, User seller, String reviewId) throws SQLException {
         User current = requireRole(connection, seller, UserRole.SELLER);
         Review review = reviews.findBySellerForUpdate(connection, current.getUsername(), reviewId);

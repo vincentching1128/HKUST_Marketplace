@@ -3,6 +3,7 @@ package com.hkust.marketplace.controllers.buyer;
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
 import com.hkust.marketplace.controllers.NotificationBoard;
+import com.hkust.marketplace.controllers.UnreadNotificationBadge;
 import com.hkust.marketplace.models.ChatThread;
 import com.hkust.marketplace.models.Deal;
 import com.hkust.marketplace.models.DealStatus;
@@ -21,7 +22,6 @@ import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
-import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
@@ -38,10 +38,11 @@ public class BuyerDashboardController {
     @FXML private StackPane contentPane;
     @FXML private Label pageTitle;
     @FXML private Label welcomeLabel;
-    @FXML private Button btnBrowse, btnDeals, btnChats, btnHistory, btnFavourites, btnNotifications, btnProfile;
+    @FXML private Button btnBrowse, btnDeals, btnChats, btnHistory, btnNotifications, btnProfile;
 
     private Button currentActiveBtn;
     private NotificationBoard notificationBoard;
+    private UnreadNotificationBadge unreadNotificationBadge;
     private BuyerListingsPane listingsPane;
     private BuyerDealsPane dealsPane;
     private ChatInboxPane chatInbox;
@@ -52,6 +53,8 @@ public class BuyerDashboardController {
 
     @FXML
     public void initialize() {
+        unreadNotificationBadge = new UnreadNotificationBadge(btnNotifications,
+                new NotificationService(userRepository, notificationRepository, UserRole.BUYER));
         User user = SessionManager.getCurrentUser();
         if (user != null) {
             welcomeLabel.setText("Hello, " + user.getFullName());
@@ -187,24 +190,6 @@ public class BuyerDashboardController {
     }
 
     @FXML
-    private void showFavourites() {
-        setActive(btnFavourites, "Favourites & Following");
-        contentPane.getChildren().clear();
-        VBox root = new VBox(16);
-        root.setPadding(new Insets(4));
-        root.setAlignment(Pos.CENTER);
-        Label icon = new Label("♥");
-        icon.setStyle("-fx-font-size: 48px; -fx-text-fill: #A68137;");
-        Label title = new Label("Favourites, Bookmarks & Following");
-        title.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: #003974;");
-        Label desc = new Label("Save listings you like and follow favourite sellers.\nThis section is a UI placeholder for students to implement.");
-        desc.setStyle("-fx-text-fill: #5a5a7a; -fx-text-alignment: center;");
-        desc.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
-        root.getChildren().addAll(icon, title, desc);
-        contentPane.getChildren().add(root);
-    }
-
-    @FXML
     private void showNotifications() {
         setActive(btnNotifications, "Notifications");
         User recipient = SessionManager.getCurrentUser();
@@ -214,7 +199,8 @@ public class BuyerDashboardController {
         }
         if (notificationBoard == null) {
             notificationBoard = new NotificationBoard(
-                    new NotificationService(userRepository, notificationRepository, UserRole.BUYER));
+                    new NotificationService(userRepository, notificationRepository, UserRole.BUYER),
+                    unreadNotificationBadge::refresh);
         }
         contentPane.getChildren().setAll(notificationBoard);
         notificationBoard.show(recipient);
@@ -238,6 +224,7 @@ public class BuyerDashboardController {
             return;
         }
         if (user == null) {
+            unreadNotificationBadge.stop();
             SessionManager.logout();
             SceneManager.showBuyerLogin();
             return;
@@ -331,6 +318,7 @@ public class BuyerDashboardController {
 
     @FXML
     private void logout() {
+        unreadNotificationBadge.stop();
         SessionManager.logout();
         SceneManager.showWelcome();
     }

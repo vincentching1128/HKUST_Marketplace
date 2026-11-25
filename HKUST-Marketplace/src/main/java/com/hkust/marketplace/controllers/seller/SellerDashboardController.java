@@ -2,6 +2,7 @@ package com.hkust.marketplace.controllers.seller;
 
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.controllers.NotificationBoard;
+import com.hkust.marketplace.controllers.UnreadNotificationBadge;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.NotificationRepository;
 import com.hkust.marketplace.repositories.SellerStatsRepository;
@@ -55,6 +56,7 @@ public class SellerDashboardController {
 
     private Button currentActiveBtn;
     private NotificationBoard notificationBoard;
+    private UnreadNotificationBadge unreadNotificationBadge;
     private SellerOffersPane offersPane;
     private final ChatService chatService = new ChatService();
     private ChatInboxPane chatInbox;
@@ -63,6 +65,8 @@ public class SellerDashboardController {
 
     @FXML
     public void initialize() {
+        unreadNotificationBadge = new UnreadNotificationBadge(btnNotifications,
+                new NotificationService(userRepository, notificationRepository, UserRole.SELLER));
         User user = SessionManager.getCurrentUser();
         if (user != null) welcomeLabel.setText("Hello, " + user.getFullName());
         currentActiveBtn = btnListings;
@@ -821,7 +825,8 @@ public class SellerDashboardController {
         }
         if (notificationBoard == null) {
             notificationBoard = new NotificationBoard(
-                    new NotificationService(userRepository, notificationRepository, UserRole.SELLER));
+                    new NotificationService(userRepository, notificationRepository, UserRole.SELLER),
+                    unreadNotificationBadge::refresh);
         }
         contentPane.getChildren().setAll(notificationBoard);
         notificationBoard.show(recipient);
@@ -846,6 +851,7 @@ public class SellerDashboardController {
         }
 
         if (user == null) {
+            unreadNotificationBadge.stop();
             SessionManager.logout();
             SceneManager.showSellerLogin();
             return;
@@ -948,6 +954,7 @@ public class SellerDashboardController {
 
     @FXML
     private void logout() {
+        unreadNotificationBadge.stop();
         SessionManager.logout();
         SceneManager.showWelcome();
     }

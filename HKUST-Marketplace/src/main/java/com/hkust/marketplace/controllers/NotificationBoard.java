@@ -6,6 +6,7 @@ import com.hkust.marketplace.services.NotificationService;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
@@ -13,6 +14,8 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
 import java.sql.SQLException;
@@ -20,13 +23,20 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 public class NotificationBoard extends ScrollPane {
+    private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm");
     private final NotificationService notifications;
+    private final Runnable onNotificationsChanged;
     private boolean includeReadNotifications;
     private boolean active;
     private long notificationRequest;
 
     public NotificationBoard(NotificationService notifications) {
+        this(notifications, () -> {});
+    }
+
+    public NotificationBoard(NotificationService notifications, Runnable onNotificationsChanged) {
         this.notifications = notifications;
+        this.onNotificationsChanged = onNotificationsChanged;
         setFitToWidth(true);
     }
 
@@ -49,7 +59,11 @@ public class NotificationBoard extends ScrollPane {
         readAll.getStyleClass().add("btn-outline");
         readAll.setDisable(true);
         readAll.setOnAction(event -> saveRead(recipient, readAll, () -> notifications.markAllAsRead(recipient)));
-        root.getChildren().add(new HBox(12, refresh, readAll, history));
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox toolbar = new HBox(10, history, spacer, readAll, refresh);
+        toolbar.setAlignment(Pos.CENTER_LEFT);
+        root.getChildren().add(toolbar);
         VBox inbox = new VBox(12, new Label("Loading notifications..."), new ProgressIndicator());
         root.getChildren().add(inbox);
         setContent(root);
@@ -68,6 +82,7 @@ public class NotificationBoard extends ScrollPane {
             for (Notification notification : load.getValue()) {
                 inbox.getChildren().add(notificationCard(notification, recipient));
             }
+            onNotificationsChanged.run();
         });
         load.setOnFailed(event -> {
             if (!currentNotificationRequest(request, recipient)) return;
@@ -96,21 +111,34 @@ public class NotificationBoard extends ScrollPane {
         return active && SessionManager.getCurrentUser() == recipient;
     }
 
-    private VBox notificationCard(Notification notification, User recipient) {
+    private HBox notificationCard(Notification notification, User recipient) {
+        boolean isRead = notification.isRead();
         Label title = new Label(notification.getTitle());
         title.setWrapText(true);
-        title.setStyle("-fx-font-weight: " + (notification.isRead() ? "normal" : "bold") + ";");
+        title.setStyle("-fx-font-weight: bold; -fx-font-size: 14px; -fx-text-fill: "
+                + (isRead ? "#3a3a5a" : "#1a1a2e") + ";");
+        Label category = new Label(notification.getCategory());
+        category.getStyleClass().addAll("badge", "notif-category");
+        category.setMinWidth(Region.USE_PREF_SIZE);
+        Label timestamp = new Label(notification.getTimestamp() == null
+                ? "Unknown time" : DATE.format(notification.getTimestamp()));
+        timestamp.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 11px;");
+        timestamp.setMinWidth(Region.USE_PREF_SIZE);
+        HBox header = new HBox(8, title, category, timestamp);
+        header.setAlignment(Pos.CENTER_LEFT);
         Label message = new Label(notification.getMessage());
         message.setWrapText(true);
-        Label meta = new Label(notification.getCategory() + " · " + (notification.getTimestamp() == null
-                ? "Unknown time" : notification.getTimestamp().format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm"))));
-        meta.setStyle("-fx-text-fill: #9aa0b0; -fx-font-size: 11px;");
-        Button read = new Button(notification.isRead() ? "Read" : "Mark as read");
+        VBox details = new VBox(4, header, message);
+        HBox.setHgrow(details, Priority.ALWAYS);
+        Button read = new Button(isRead ? "Read" : "Mark as read");
         read.getStyleClass().addAll("btn-outline", "btn-sm");
-        read.setDisable(notification.isRead());
+        read.setMinWidth(Region.USE_PREF_SIZE);
+        read.setDisable(isRead);
         read.setOnAction(event -> saveRead(recipient, read, () -> notifications.markAsRead(recipient, notification.getId())));
-        VBox item = new VBox(6, title, message, new HBox(12, meta, read));
+        HBox item = new HBox(12, details, read);
+        item.setAlignment(Pos.CENTER_LEFT);
         item.getStyleClass().add("notif-item");
+        if (isRead) item.getStyleClass().add("notif-item-read");
         return item;
     }
 
@@ -127,6 +155,8 @@ public class NotificationBoard extends ScrollPane {
             }
         };
         save.setOnSucceeded(done -> {
+            if (SessionManager.getCurrentUser() != recipient) return;
+            onNotificationsChanged.run();
             if (isActiveFor(recipient)) show(recipient);
         });
         save.setOnFailed(done -> {

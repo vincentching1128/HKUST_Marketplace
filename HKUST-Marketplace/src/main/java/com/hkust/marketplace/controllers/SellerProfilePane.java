@@ -36,8 +36,21 @@ public final class SellerProfilePane extends VBox {
             scroll.setFitToWidth(true);
             scroll.setPrefViewportWidth(470);
             scroll.setPrefViewportHeight(380);
-            dialog.getDialogPane().setContent(scroll);
-            dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+            DialogPane pane = dialog.getDialogPane();
+            pane.setContent(scroll);
+            // Keep the close type registered for the window controls and Escape.
+            pane.getButtonTypes().add(ButtonType.CLOSE);
+            var closeButton = pane.lookupButton(ButtonType.CLOSE);
+            closeButton.setVisible(false);
+            closeButton.setManaged(false);
+            if (pane.lookup(".button-bar") instanceof ButtonBar footer) {
+                footer.setVisible(false);
+                footer.setManaged(false);
+                // DialogPane still measures its button bar even when it is unmanaged.
+                footer.setMinHeight(0);
+                footer.setPrefHeight(0);
+                footer.setMaxHeight(0);
+            }
             dialog.showAndWait();
         });
         return button;

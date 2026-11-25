@@ -185,6 +185,22 @@
     -fx-background-color: #ffebee;
     -fx-text-fill: #c62828;
 }
+.badge-deal-type,
+.badge-deal-pending,
+.notification-count {
+    -fx-background-color: #fff0d3;
+    -fx-text-fill: #704900;
+}
+.badge-deal-type {
+    -fx-background-color: #f4ead2;
+}
+.notification-count {
+    -fx-background-radius: 12;
+    -fx-padding: 2 7;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-alignment: CENTER;
+}
 
 /* ---------- Table ---------- */
 .table-view {
@@ -201,6 +217,12 @@
 }
 .table-row-cell:selected {
     -fx-background-color: #e8f0f8;
+}
+.deal-history-table .table-row-cell:filled:selected {
+    -fx-background-color: #003974;
+}
+.deal-history-table .table-row-cell:filled:selected .table-cell {
+    -fx-text-fill: white;
 }
 
 /* ---------- Welcome / Auth screens ---------- */
@@ -251,10 +273,17 @@
 .notif-item {
     -fx-background-color: white;
     -fx-background-radius: 10;
-    -fx-padding: 14 18;
-    -fx-border-color: #e8f0f8;
+    -fx-padding: 10 14;
     -fx-border-width: 0 0 0 4;
     -fx-border-color: #A68137;
+}
+.notif-item-read {
+    -fx-background-color: #f5f7fa;
+    -fx-border-color: #dce4ee;
+}
+.notif-category {
+    -fx-background-color: #e8f0f8;
+    -fx-text-fill: #435571;
 }
 
 /* ---------- Misc ---------- */

@@ -89,7 +89,7 @@ mvn clean javafx:run
 
 ### Buyer Portal
 - Registration, Login, Browse Marketplace, Make Offer / Borrow / Claim
-- My Deals, Deal History, Favourites (placeholder), Notifications, Profile
+- My Deals, Deal History, Notifications, Profile
 
 ### Seller Portal
 - Registration, Login, Create Listing, My Listings

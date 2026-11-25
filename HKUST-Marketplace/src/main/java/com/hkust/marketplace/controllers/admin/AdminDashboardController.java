@@ -4,6 +4,7 @@ import com.hkust.marketplace.controllers.RatingDisplay;
 
 import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.controllers.NotificationBoard;
+import com.hkust.marketplace.controllers.UnreadNotificationBadge;
 import com.hkust.marketplace.controllers.SellerProfilePane;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.repositories.ListingRepository;
@@ -12,6 +13,7 @@ import com.hkust.marketplace.repositories.DealRepository;
 import com.hkust.marketplace.repositories.ReviewRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.NotificationService;
+import com.hkust.marketplace.services.ReviewService;
 import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
@@ -54,15 +56,19 @@ public class AdminDashboardController {
 
     private Button currentActiveBtn;
     private NotificationBoard notificationBoard;
+    private UnreadNotificationBadge unreadNotificationBadge;
     private final UserRepository userRepository = new UserRepository();
     private final ListingRepository listingRepository = new ListingRepository();
     private final ListingService listingService = new ListingService();
     private final NotificationRepository notificationRepository = new NotificationRepository();
     private final DealRepository dealRepository = new DealRepository();
     private final ReviewRepository reviewRepository = new ReviewRepository();
+    private final ReviewService reviewService = new ReviewService();
 
     @FXML
     public void initialize() {
+        unreadNotificationBadge = new UnreadNotificationBadge(btnNotifications,
+                new NotificationService(userRepository, notificationRepository, UserRole.ADMIN));
         User user = SessionManager.getCurrentUser();
         if (user != null) welcomeLabel.setText("Admin: " + user.getFullName());
         currentActiveBtn = btnReview;
@@ -1268,7 +1274,7 @@ public class AdminDashboardController {
         hide.setTooltip(new Tooltip(review.isHidden()
                 ? "This review is hidden from sellers and buyers."
                 : "Hide this review from sellers and buyers."));
-        hide.setOnAction(event -> hideReview(review, review.isHidden(), reloadAction));
+        hide.setOnAction(event -> setReviewVisibility(review, reloadAction));
         HBox titleRow = new HBox(10, stars, parties);
         if (review.isFlagged()) {
             Label badge = new Label("FLAGGED");
@@ -1293,13 +1299,9 @@ public class AdminDashboardController {
         return row;
     }
 
-    /** Persists hidden = TRUE for one review, then reloads the list with the active filters. */
-    private void hideReview(Review review, Boolean hidden, Runnable reloadAction) {
+    private void setReviewVisibility(Review review, Runnable reloadAction) {
         try {
-            if (!reviewRepository.hide(review.getId(),hidden)) {
-                new Alert(Alert.AlertType.WARNING,
-                        "This review is no longer exists.").showAndWait();
-            }
+            reviewService.setHidden(SessionManager.getCurrentUser(), review.getId(), !review.isHidden());
             reloadAction.run();
         } catch (SQLException ex) {
             LOGGER.log(Level.SEVERE, "Failed to hide or unhide review " + review.getId(), ex);
@@ -1320,7 +1322,8 @@ public class AdminDashboardController {
         }
         if (notificationBoard == null) {
             notificationBoard = new NotificationBoard(
-                    new NotificationService(userRepository, notificationRepository, UserRole.ADMIN));
+                    new NotificationService(userRepository, notificationRepository, UserRole.ADMIN),
+                    unreadNotificationBadge::refresh);
         }
         contentPane.getChildren().setAll(notificationBoard);
         notificationBoard.show(recipient);
@@ -1344,6 +1347,7 @@ public class AdminDashboardController {
             return;
         }
         if (user == null) {
+            unreadNotificationBadge.stop();
             SessionManager.logout();
             SceneManager.showAdminLogin();
             return;
@@ -1408,6 +1412,7 @@ public class AdminDashboardController {
 
     @FXML
     private void logout() {
+        unreadNotificationBadge.stop();
         SessionManager.logout();
         SceneManager.showWelcome();
     }

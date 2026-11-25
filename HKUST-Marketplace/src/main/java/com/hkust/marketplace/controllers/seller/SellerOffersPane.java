@@ -149,7 +149,7 @@ public class SellerOffersPane extends VBox {
             actions.getChildren().add(chat);
         }
         if (deal.getDealType() != ListingType.GIVEAWAY) {
-            Button counter = button(deal.getStatus() == DealStatus.COUNTERED ? "Revise Counter" : "Counter", "btn-outline");
+            Button counter = button(deal.getStatus() == DealStatus.COUNTERED ? "Revise Counter" : "Counter Offer", "btn-outline");
             counter.setOnAction(event -> counterDialog(deal).showAndWait().ifPresent(terms ->
                     runAction(seller -> {
                         service.counterOffer(seller, deal.getId(), deal.getRowVersion(),

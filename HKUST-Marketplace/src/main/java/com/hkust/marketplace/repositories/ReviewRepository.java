@@ -150,22 +150,24 @@ public class ReviewRepository {
         }
     }
 
-    /**
-     * Admin moderation: marks one review as hidden (sets {@code hidden = TRUE}).
-     *
-     * @return true when an existing visible review was hidden; false when it was already
-     *         hidden or no longer exists
-     */
-    public boolean hide(String reviewId,Boolean hidden) throws SQLException {
+    public Review findForModeration(Connection connection, String reviewId) throws SQLException {
         if (reviewId == null || reviewId.isBlank()) {
             throw new IllegalArgumentException("A review ID is required.");
         }
+        try (PreparedStatement statement = connection.prepareStatement(SELECT_REVIEWS + "WHERE r.id = ? FOR UPDATE")) {
+            statement.setString(1, reviewId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? map(rows) : null;
+            }
+        }
+    }
+
+    public void setHidden(Connection connection, String reviewId, boolean hidden) throws SQLException {
         String sql = "UPDATE reviews SET hidden = ? WHERE id = ?";
-        try (Connection connection = DatabaseManager.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setBoolean(1,!hidden);
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setBoolean(1, hidden);
             statement.setString(2, reviewId);
-            return statement.executeUpdate() > 0;
+            statement.executeUpdate();
         }
     }
 

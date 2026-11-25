@@ -4,8 +4,11 @@ import com.hkust.marketplace.models.*;
 import com.hkust.marketplace.services.ChatService;
 import javafx.animation.*;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
+import javafx.beans.binding.DoubleBinding;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.util.Duration;
@@ -21,6 +24,9 @@ public class ChatPane extends VBox {
     private final String threadId;
     private final VBox messages=new VBox(10);
     private final ScrollPane scroll=new ScrollPane(messages);
+    private final DoubleBinding bubbleWidth = Bindings.createDoubleBinding(
+            () -> Math.min(460, scroll.getViewportBounds().getWidth() * 0.75),
+            scroll.viewportBoundsProperty());
     private final Label heading=new Label("Private Chat"), feedback=new Label();
     private final TextArea compose=new TextArea();
     private final TextField search=new TextField();
@@ -37,25 +43,36 @@ public class ChatPane extends VBox {
 
     public ChatPane(ChatService service,Supplier<User> user,String threadId,Runnable back,Runnable propose) {
         super(12);this.service=Objects.requireNonNull(service);this.user=Objects.requireNonNull(user);this.threadId=Objects.requireNonNull(threadId);
-        setPadding(new Insets(4));heading.setWrapText(true);heading.setStyle("-fx-font-size: 18px; -fx-font-weight: bold;");
-        Button leave=new Button("Back to Chats");leave.getStyleClass().add("btn-outline");leave.setOnAction(e->back.run());
-        refresh.getStyleClass().add("btn-outline");refresh.setOnAction(e->refresh());
+        setPadding(new Insets(4));heading.setStyle("-fx-font-size: 18px; -fx-font-weight: bold;");
+        Tooltip fullTitle = new Tooltip();
+        fullTitle.textProperty().bind(heading.textProperty());
+        heading.setTooltip(fullTitle);
+        Button leave=new Button("Back to Chats");leave.getStyleClass().addAll("btn-outline", "btn-sm");leave.setOnAction(e->back.run());
+        refresh.getStyleClass().addAll("btn-outline", "btn-sm");refresh.setOnAction(e->refresh());
         search.setPromptText("Search this conversation");HBox.setHgrow(search,Priority.ALWAYS);
         find.setOnAction(e->{activeSearch=search.getText().strip();refresh();});search.setOnAction(e->find.fire());
         clear.setOnAction(e->{search.clear();activeSearch="";refresh();});
         feedback.setWrapText(true);feedback.setStyle("-fx-text-fill: #5a5a7a;");
+        messages.setPadding(new Insets(12));
         scroll.setFitToWidth(true);VBox.setVgrow(scroll,Priority.ALWAYS);
-        compose.setWrapText(true);compose.setPrefRowCount(3);compose.setPromptText("Write a private message (up to 4,000 characters)");
+        compose.setWrapText(true);compose.setPrefRowCount(2);compose.setPromptText("Write a private message (up to 4,000 characters)");
         send.getStyleClass().add("btn-primary");send.setOnAction(e->send());
         compose.textProperty().addListener((obs,old,value)->updateControls());
-        HBox navigation=new HBox(12,leave,refresh);
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox navigation = new HBox(12, leave, heading, spacer);
+        navigation.setAlignment(Pos.CENTER_LEFT);
         if(propose!=null && user.get()!=null && user.get().getRole()==UserRole.BUYER) {
             Button formal=new Button("Make Formal Proposal");
-            formal.getStyleClass().add("btn-primary");
+            formal.getStyleClass().addAll("btn-primary", "btn-sm");
             formal.setOnAction(e->propose.run());
             navigation.getChildren().add(formal);
         }
-        getChildren().addAll(navigation,heading,new HBox(10,search,find,clear),feedback,scroll,compose,send);
+        navigation.getChildren().add(refresh);
+        HBox composeBar = new HBox(10, compose, send);
+        composeBar.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(compose, Priority.ALWAYS);
+        getChildren().addAll(navigation,new HBox(10,search,find,clear),feedback,scroll,composeBar);
         updateControls();
         polling=new Timeline(new KeyFrame(Duration.seconds(4),e->{if(!loading&&!saving)load(false);}));polling.setCycleCount(Timeline.INDEFINITE);polling.play();
     }
@@ -69,7 +86,9 @@ public class ChatPane extends VBox {
         if(explicit)feedback.setText("Loading conversation...");
         Task<ChatConversation> task=new Task<>(){protected ChatConversation call()throws SQLException{return service.getConversation(actor,threadId,filter);}};
         task.setOnSucceeded(e->{if(!current(token,actor))return;loading=false;ChatConversation value=task.getValue();canSend=value.canSend();
-            ChatThread thread=value.thread();String other=actor.getRole()==UserRole.SELLER?thread.buyerName():thread.sellerName();heading.setText(thread.listingTitle()+" — @"+other);
+            ChatThread thread = value.thread();
+            String other = actor.getRole() == UserRole.SELLER ? thread.buyerUsername() : thread.sellerUsername();
+            heading.setText(thread.listingTitle() + " · " + (other == null ? "Deleted user" : "@" + other));
             messages.getChildren().clear();
             if(value.messages().isEmpty())messages.getChildren().add(new Label(filter.isBlank()?"No messages yet. Start the conversation below.":"No matching messages."));
             for(ChatMessage message:value.messages())messages.getChildren().add(messageCard(message,actor));
@@ -80,14 +99,32 @@ public class ChatPane extends VBox {
         start(task,"chat-message-load");
     }
 
-    private VBox messageCard(ChatMessage message,User actor) {
-        boolean mine=message.senderRole()==actor.getRole();
-        Label meta=new Label((mine?"You":"@"+message.senderName())+" · "+message.createdAt().format(DATE));
-        meta.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 11px;");meta.setWrapText(true);
-        Label body=new Label(message.body());body.setWrapText(true);
-        VBox card=new VBox(6,meta);
-        if(message.kind()!=ChatMessage.Kind.TEXT){Label kind=new Label(message.kind()==ChatMessage.Kind.COUNTER?"Formal counteroffer":"Formal proposal");kind.setStyle("-fx-font-weight: bold;");card.getChildren().add(kind);}
-        card.getChildren().add(body);card.setPadding(new Insets(12));card.setStyle("-fx-background-radius: 10; -fx-background-color: "+(mine?"#e8f0f8":"#ffffff")+";");return card;
+    private HBox messageCard(ChatMessage message, User actor) {
+        boolean mine = message.senderRole() == actor.getRole();
+        Label meta = new Label((mine ? "You" : "@" + message.senderName()) + " · " + message.createdAt().format(DATE));
+        meta.setStyle("-fx-text-fill: #5a5a7a; -fx-font-size: 11px;");
+        meta.setWrapText(true);
+        Label body = new Label(message.body());
+        body.setWrapText(true);
+
+        VBox card = new VBox(4, meta);
+        card.setPadding(new Insets(10, 12, 10, 12));
+        card.maxWidthProperty().bind(bubbleWidth);
+        if (message.kind() == ChatMessage.Kind.TEXT) {
+            card.setStyle("-fx-background-radius: 12; -fx-background-color: " + (mine ? "#e8f0f8" : "#ffffff") + ";");
+        } else {
+            Label kind = new Label(message.kind() == ChatMessage.Kind.COUNTER ? "Formal counteroffer" : "Formal proposal");
+            kind.setStyle("-fx-font-weight: bold;");
+            kind.setWrapText(true);
+            card.getChildren().add(kind);
+            card.setStyle("-fx-border-color: #A68137; -fx-border-width: 1 1 1 4; "
+                    + "-fx-background-color: #fdfbf5; -fx-background-radius: 10; -fx-border-radius: 10;");
+        }
+        card.getChildren().add(body);
+
+        HBox row = new HBox(card);
+        row.setAlignment(mine ? Pos.CENTER_RIGHT : Pos.CENTER_LEFT);
+        return row;
     }
 
     private void send() {
