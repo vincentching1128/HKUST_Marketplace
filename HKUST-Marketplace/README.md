@@ -5,7 +5,7 @@ A JavaFX desktop application backed by a local MySQL database.
 ## Prerequisites
 
 - A desktop session for the JavaFX window.
-- A full JDK 21. Check that both `java -version` and `javac -version` report version 21 in your terminal.
+- A full JDK 21 for the reference setup. Maven compiles for Java 21. The full test suite has also been verified on JDK 26.0.2.1. Run `.\mvnw.cmd -v` to check which JDK Maven is using.
 - Internet access for the first build. The Maven Wrapper downloads Maven and the project dependencies, including JavaFX and the MySQL driver.
 - MySQL Server 8 running on `localhost:3306`, and a SQL client for one-time setup. The examples below use the MySQL command-line client on your PATH.
 
@@ -27,6 +27,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON hkust_marketplace.* TO 'marketplace_app'
 exit
 ```
 
+Use a fresh database for a new setup. The schema script creates missing tables and leaves existing table definitions in place. On older databases, check that the `deals.buyer_username` and `deals.seller_username` columns allow `NULL` and that both foreign keys to `users` use `ON DELETE SET NULL`. This preserves deal history when an account is deleted.
+
 In the PowerShell session that will launch the app, set the MySQL credentials:
 
 ```powershell
@@ -41,10 +43,11 @@ username=marketplace_app
 password=replace-with-your-password
 ```
 
+Keep your MySQL credentials and local configuration files outside the repository.
+
 ## How to Run (Windows)
 
-Open **PowerShell** or **Command Prompt** in the project folder  
-(`...\HKUST-Marketplace\HKUST-Marketplace`):
+Open **PowerShell** or **Command Prompt** in the folder containing `pom.xml` and `mvnw.cmd`:
 
 ```powershell
 .\mvnw.cmd clean javafx:run
@@ -79,6 +82,33 @@ mvn clean javafx:run
 | Buyer  | `bob`     | `password1`|
 | Seller | `charlie` | `password1`|
 | Seller | `diana`   | `password1`|
+
+## Run the tests and generate coverage
+
+Run the suite from a desktop session so the JavaFX tests can open and dismiss windows. The Admin suites use the database configured for the test run. Use a fresh MySQL database initialized with `src/main/resources/db/schema.sql` so they can safely create and delete test records. Other MySQL integration fixtures start disposable servers and locate `mysqld` in the standard Windows installation path or on `PATH`. If MySQL is installed elsewhere, set `MYSQLD` to the full executable path before testing.
+
+To keep test data separate from your app data, create a database such as `hkust_marketplace_test`. Import a copy of `schema.sql` with its first line changed to `USE hkust_marketplace_test;` and give your test MySQL account `SELECT`, `INSERT`, `UPDATE`, and `DELETE` privileges on that database. Save the connection details to a properties file outside the repository:
+
+```properties
+url=jdbc:mysql://localhost:3306/hkust_marketplace_test
+username=your-test-mysql-user
+password=your-test-mysql-password
+```
+
+From the folder containing `pom.xml`, run this PowerShell command with the path to that file:
+
+```powershell
+.\mvnw.cmd "-Dmarketplace.db.config=C:/path/to/test-db.properties" "-Dtest=*Test,*IT" clean test jacoco:report
+```
+
+The database override applies to that Maven run. If your normal app database is already a fresh test database, you can omit the override and use the credentials configured above. The test pattern includes both regular JUnit tests and `*IT` integration tests.
+
+| Report | Output |
+|--------|--------|
+| JUnit results | `target/surefire-reports/` contains XML and text reports. Maven prints totals for tests run, failures, errors, and skips. |
+| JaCoCo coverage | Open `target/site/jacoco/index.html` and read **Branches** in the **Total** row for project-wide branch coverage. |
+
+The assignment asks for a JUnit report with 100% of tests passing and a coverage report with more than 65% branch coverage.
 
 ## Features
 
