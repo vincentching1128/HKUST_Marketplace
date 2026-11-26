@@ -16,7 +16,7 @@
 
 | Test Case ID | Method Name | What the Test Verifies |
 | :--- | :--- | :--- |
-| **TC-ADM-01** | `seededAdminCanLogin` | Confirms the hardcoded seeded credential (`admin` / `admin123`) authenticates with `LoginStatus.SUCCESS` and role `ADMIN` (safely skipped via JUnit `Assumptions` if the seeded password was customized). |
+| **TC-ADM-01** | `seededAdminCanLogin` | Confirms the hardcoded seeded credential (`admin` / `Admin123`) authenticates with `LoginStatus.SUCCESS` and role `ADMIN` (safely skipped via JUnit `Assumptions` if the seeded password was customized). |
 | **TC-ADM-02** | `adminLoginTrimsAndLowercasesUsername` | Verifies login trims leading/trailing whitespace and normalizes username casing before authentication. |
 | **TC-ADM-03** | `blankCredentialsFailValidation` | Ensures blank usernames, empty passwords, and null roles are rejected with `LoginStatus.INVALID_INPUT`. |
 | **TC-ADM-04** | `unknownUserAndWrongPasswordRejected` | Confirms non-existent accounts return `USER_NOT_FOUND` and wrong passwords return `INCORRECT_PASSWORD` with a null user object. |

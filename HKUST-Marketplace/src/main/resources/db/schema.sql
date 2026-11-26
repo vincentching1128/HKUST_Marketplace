@@ -258,22 +258,10 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 
 -- Buyer/seller identity validation belongs in the backend deal service.
--- ============================================================
--- Seed demo accounts (same credentials as the in-memory demo).
--- Passwords are salted Argon2id hashes. Demo login passwords remain
--- admin123 for admin and password1 for the other four accounts.
--- Existing plaintext rows can be upgraded with PasswordMigration;
--- successful legacy logins also upgrade their stored password.
--- INSERT IGNORE keeps this script re-runnable (username is the PK).
--- ============================================================
+-- Seed the existing admin account for fresh installations.
+-- INSERT IGNORE preserves the password and profile of an existing admin.
 INSERT IGNORE INTO users
     (username, full_name, password_hash, role,
      residence_hall, bio, preferred_meetup, active)
 VALUES
-    ('admin',   'HKUST Marketplace Admin', '$argon2id$v=19$m=19456,t=2,p=1$5GUYDuRgfgAJLT/ARasiFg$vcSHZNWD31oH57tee9uX5iI4CX04ddGsIrH0Adbte80', 'ADMIN', NULL, NULL, NULL, TRUE),
-    ('alice',   'Alice Chan', '$argon2id$v=19$m=19456,t=2,p=1$aZ1KIYfT1gSgVyl24sLYzw$xSPGD8I+HbBA0ZkB26Bet86bpWEU0PSdiFtBsioUyZk', 'BUYER', 'Hall 3', NULL, NULL, TRUE),
-    ('bob',     'Bob Wong', '$argon2id$v=19$m=19456,t=2,p=1$6w1dLgOqHE5N7fp1c0MhLQ$DCCz4KqF9b+qzJlSw4CIQE0IwrkH197OuzfEhUvyJZw', 'BUYER', 'Off-campus', NULL, NULL, TRUE),
-    ('charlie', 'Charlie Lee', '$argon2id$v=19$m=19456,t=2,p=1$UV8Td+PqbVd0ktsDMjrk+A$SnWIPrnQNK+RR4o5lRXhpQ3ZsciS9Oh3cNm4hTnTjJw', 'SELLER', NULL,
-     'Final year CSE student selling textbooks and gadgets.', 'Library', TRUE),
-    ('diana',   'Diana Ng', '$argon2id$v=19$m=19456,t=2,p=1$7+V42kBf0v3aAqxwmBayyQ$SBsvvJ/pDs3ZPNtEvFGIKVrtGuSZBfTUVj1WBM70K2M', 'SELLER', NULL,
-     'Selling furniture and kitchen items before graduation.', 'Hall 5 Lobby', TRUE);
+    ('admin',   'HKUST Marketplace Admin', '$argon2id$v=19$m=19456,t=2,p=1$XyO+XgbpU7xAgOOn3KpU3g$HFJl0UFMaE6R1l/kcgU31MwWeYNY361m+r7sToYn0+c', 'ADMIN', NULL, NULL, NULL, TRUE);

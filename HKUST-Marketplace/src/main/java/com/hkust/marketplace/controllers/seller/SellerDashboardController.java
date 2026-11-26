@@ -16,7 +16,7 @@ import com.hkust.marketplace.controllers.SellerProfilePane;
 import com.hkust.marketplace.controllers.ChatInboxPane;
 import com.hkust.marketplace.controllers.ChatPane;
 import javafx.concurrent.Task;
-import com.hkust.marketplace.utils.DummyDataService;
+import com.hkust.marketplace.utils.MarketplaceOptions;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.collections.FXCollections;
@@ -436,10 +436,10 @@ public class SellerDashboardController {
 
         TextField nameField = new TextField();
         nameField.setPromptText("Item name *");
-        ComboBox<String> catCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.CATEGORIES));
+        ComboBox<String> catCombo = new ComboBox<>(FXCollections.observableArrayList(MarketplaceOptions.CATEGORIES));
         catCombo.setPromptText("Category *");
         catCombo.setMaxWidth(Double.MAX_VALUE);
-        ComboBox<String> condCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.CONDITIONS));
+        ComboBox<String> condCombo = new ComboBox<>(FXCollections.observableArrayList(MarketplaceOptions.CONDITIONS));
         condCombo.setPromptText("Condition *");
         condCombo.setMaxWidth(Double.MAX_VALUE);
         TextArea descArea = new TextArea();
@@ -474,7 +474,7 @@ public class SellerDashboardController {
             }
         });
 
-        ComboBox<String> meetupCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
+        ComboBox<String> meetupCombo = new ComboBox<>(FXCollections.observableArrayList(MarketplaceOptions.HKUST_LOCATIONS));
         meetupCombo.setPromptText("Meet-up location *");
         meetupCombo.setMaxWidth(Double.MAX_VALUE);
 
@@ -880,7 +880,7 @@ public class SellerDashboardController {
         pass.setPromptText("New password (optional)");
         TextArea bio = new TextArea(user != null && user.getBio() != null ? user.getBio() : "");
         bio.setPrefRowCount(3);
-        ComboBox<String> meetup = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
+        ComboBox<String> meetup = new ComboBox<>(FXCollections.observableArrayList(MarketplaceOptions.HKUST_LOCATIONS));
         meetup.getItems().add(0, "None");
         meetup.setValue("None");
         if (user != null && user.getPreferredMeetup() != null) meetup.setValue(user.getPreferredMeetup());

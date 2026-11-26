@@ -2,7 +2,7 @@ package com.hkust.marketplace.controllers.seller;
 
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
-import com.hkust.marketplace.utils.DummyDataService;
+import com.hkust.marketplace.utils.MarketplaceOptions;
 import com.hkust.marketplace.utils.SceneManager;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
@@ -36,7 +36,7 @@ public class SellerRegisterController {
 
     @FXML
     public void initialize() {
-        meetupCombo.setItems(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
+        meetupCombo.setItems(FXCollections.observableArrayList(MarketplaceOptions.HKUST_LOCATIONS));
         meetupCombo.getItems().add(0, "None");
     }
 

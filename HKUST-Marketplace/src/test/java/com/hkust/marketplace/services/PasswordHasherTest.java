@@ -1,8 +1,5 @@
 package com.hkust.marketplace.services;
 
-import com.hkust.marketplace.models.User;
-import com.hkust.marketplace.models.UserRole;
-import com.hkust.marketplace.utils.DummyDataService;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -61,36 +58,33 @@ class PasswordHasherTest {
     }
 
     @Test
-    void inMemoryBuyerRegistrationAndDemoAccountsUseHashes() {
-        DummyDataService store = DummyDataService.getInstance();
-        User buyer = new User("hashed_buyer_" + System.nanoTime(), "Buyer", "StrongPassword123!", UserRole.BUYER);
-        store.registerUser(buyer);
-        assertSame(buyer, store.findUser(buyer.getUsername()));
-        assertTrue(PasswordHasher.isHash(buyer.getPasswordHash()));
-        assertTrue(PasswordHasher.verify("StrongPassword123!", buyer.getPasswordHash()));
-        for (String name : new String[] { "admin", "alice", "bob", "charlie", "diana" }) {
-            User demo = store.findUser(name);
-            assertTrue(PasswordHasher.isHash(demo.getPasswordHash()));
-            assertTrue(PasswordHasher.verify(name.equals("admin") ? "admin123" : "password1", demo.getPasswordHash()));
-        }
-    }
-
-    @Test
-    void freshDatabaseSeedsHaveDistinctHashesAndKeepTheDemoPasswords() throws Exception {
+    void freshDatabaseSeedsOnlyTheExistingAdminAndDemoUsersAreTestFixtures() throws Exception {
         String schema = Files.readString(Path.of("src/main/resources/db/schema.sql"));
-        Matcher accounts = Pattern.compile("\\('([^']+)',\\s*'[^']*',\\s*'([^']*)',\\s*'(ADMIN|BUYER|SELLER)'")
-                .matcher(schema);
+        String fixtures = Files.readString(Path.of("src/test/resources/db/buyer-seller-fixtures.sql"));
+        Pattern seedAccount = Pattern.compile("\\('([^']+)',\\s*'[^']*',\\s*'([^']*)',\\s*'(ADMIN|BUYER|SELLER)'");
+        Matcher admin = seedAccount.matcher(schema);
+        assertTrue(admin.find());
+        assertEquals("admin", admin.group(1));
+        assertEquals("ADMIN", admin.group(3));
+        assertTrue(PasswordHasher.isHash(admin.group(2)));
+        assertEquals("OK", AuthService.checkPasswordStrength("Admin123"));
+        assertTrue(PasswordHasher.verify("Admin123", admin.group(2)));
         Set<String> hashes = new HashSet<>();
+        hashes.add(admin.group(2));
+        assertFalse(admin.find(), "The application schema must seed only the admin account");
+
+        Matcher accounts = seedAccount.matcher(fixtures);
         int count = 0;
         while (accounts.find()) {
             String username = accounts.group(1);
             String hash = accounts.group(2);
             assertTrue(PasswordHasher.isHash(hash), username);
-            assertTrue(PasswordHasher.verify(username.equals("admin") ? "admin123" : "password1", hash), username);
+            assertNotEquals("ADMIN", accounts.group(3));
+            assertTrue(PasswordHasher.verify("password1", hash), username);
             hashes.add(hash);
             count++;
         }
-        assertEquals(5, count);
+        assertEquals(4, count);
         assertEquals(5, hashes.size());
     }
 }

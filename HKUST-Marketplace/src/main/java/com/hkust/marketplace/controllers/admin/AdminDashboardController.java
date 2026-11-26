@@ -15,7 +15,7 @@ import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.NotificationService;
 import com.hkust.marketplace.services.ReviewService;
 import com.hkust.marketplace.services.ListingService;
-import com.hkust.marketplace.utils.DummyDataService;
+import com.hkust.marketplace.utils.MarketplaceOptions;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 import javafx.beans.property.ReadOnlyStringWrapper;
@@ -103,7 +103,6 @@ public class AdminDashboardController {
         VBox root = new VBox(14);
         root.setPadding(new Insets(4));
 
-        //List<Listing> pending = DummyDataService.getInstance().getPendingListings();
         List<Listing> pending = List.of();
         try{
             pending = listingRepository.findByStatus(ListingStatus.PENDING_REVIEW);
@@ -201,15 +200,6 @@ public class AdminDashboardController {
             conf.showAndWait().ifPresent(r -> {
                 if (r == ButtonType.OK) {
                     approve_listing(l);
-                    /*
-                    l.setStatus(ListingStatus.LIVE);
-                    l.setReviewedAt(LocalDateTime.now());
-                    DummyDataService.getInstance().updateListing(l);
-                    DummyDataService.getInstance().addNotification(new Notification(
-                            l.getSellerUsername(), "Listing Approved",
-                            "Your listing '" + l.getTitle() + "' is now live!", "System"));
-
-                     */
                     showReview();
                 }
             });
@@ -228,16 +218,6 @@ public class AdminDashboardController {
                     return;
                 }
                 reject_listing(l,reason.trim());
-                /*
-                l.setStatus(ListingStatus.REJECTED);
-                l.setRejectionReason(reason);
-                l.setReviewedAt(LocalDateTime.now());
-                DummyDataService.getInstance().updateListing(l);
-                DummyDataService.getInstance().addNotification(new Notification(
-                        l.getSellerUsername(), "Listing Rejected",
-                        "Your listing '" + l.getTitle() + "' was rejected. Reason: " + reason, "System"));
-
-                 */
                 showReview();
             });
         });
@@ -386,7 +366,6 @@ public class AdminDashboardController {
                             }
 
                             removeListing(l,reason.trim());
-                            //DummyDataService.getInstance().removeListing(l.getId());
                             showAllListings();
                         });
                     };
@@ -452,10 +431,10 @@ public class AdminDashboardController {
 
         TextField nameField = new TextField();
         nameField.setPromptText("Item name *");
-        ComboBox<String> catCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.CATEGORIES));
+        ComboBox<String> catCombo = new ComboBox<>(FXCollections.observableArrayList(MarketplaceOptions.CATEGORIES));
         catCombo.setPromptText("Category *");
         catCombo.setMaxWidth(Double.MAX_VALUE);
-        ComboBox<String> condCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.CONDITIONS));
+        ComboBox<String> condCombo = new ComboBox<>(FXCollections.observableArrayList(MarketplaceOptions.CONDITIONS));
         condCombo.setPromptText("Condition *");
         condCombo.setMaxWidth(Double.MAX_VALUE);
         TextArea descArea = new TextArea();
@@ -489,7 +468,7 @@ public class AdminDashboardController {
             }
         });
 
-        ComboBox<String> meetupCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
+        ComboBox<String> meetupCombo = new ComboBox<>(FXCollections.observableArrayList(MarketplaceOptions.HKUST_LOCATIONS));
         meetupCombo.setPromptText("Meet-up location *");
         meetupCombo.setMaxWidth(Double.MAX_VALUE);
 
@@ -933,7 +912,7 @@ public class AdminDashboardController {
             bioArea = new TextArea(target.getBio() != null ? target.getBio() : "");
             bioArea.setPrefRowCount(3);
             bioArea.setWrapText(true);
-            meetupCombo = new ComboBox<>(FXCollections.observableArrayList(DummyDataService.HKUST_LOCATIONS));
+            meetupCombo = new ComboBox<>(FXCollections.observableArrayList(MarketplaceOptions.HKUST_LOCATIONS));
             meetupCombo.getItems().add(0, "None");
             meetupCombo.setMaxWidth(Double.MAX_VALUE);
             meetupCombo.setValue(target.getPreferredMeetup() != null ? target.getPreferredMeetup() : "None");

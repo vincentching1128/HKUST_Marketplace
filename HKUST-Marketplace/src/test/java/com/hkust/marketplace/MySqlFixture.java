@@ -74,7 +74,8 @@ public abstract class MySqlFixture {
         }
         try (Connection conn = DriverManager.getConnection(serverUrl + database, "root", password);
              Statement sql = conn.createStatement()) {
-            String schema = Files.readString(Path.of("src/main/resources/db/schema.sql"))
+            String schema = (Files.readString(Path.of("src/main/resources/db/schema.sql")) + "\n"
+                    + Files.readString(Path.of("src/test/resources/db/buyer-seller-fixtures.sql")))
                     .replaceAll("(?m)^\\s*--[^\\r\\n]*", "").strip();
             for (String statement : schema.split(";")) {
                 if (!statement.isBlank() && !statement.strip().equals("USE hkust_marketplace")) sql.execute(statement);

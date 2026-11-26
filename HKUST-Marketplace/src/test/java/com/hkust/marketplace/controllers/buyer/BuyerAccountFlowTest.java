@@ -6,7 +6,6 @@ import com.hkust.marketplace.models.UserRole;
 import com.hkust.marketplace.repositories.UserRepository;
 import com.hkust.marketplace.services.AuthService;
 import com.hkust.marketplace.services.PasswordHasher;
-import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
 
@@ -61,7 +60,6 @@ class BuyerAccountFlowTest extends BuyerFxFixture {
         assertEquals(UserRole.BUYER, saved.getRole());
         assertEquals("Hall 3", saved.getResidenceHall());
         assertTrue(PasswordHasher.verify("OriginalPassword123!", saved.getPasswordHash()));
-        assertNull(DummyDataService.getInstance().findUser(username));
 
         String seller = fixture();
         new AuthService().register(new User(seller, "Seller", null, UserRole.SELLER), "OriginalPassword123!");

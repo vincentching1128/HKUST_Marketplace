@@ -228,10 +228,10 @@ public class AdminPortalTest {
 
         /**
          * Test Case: TC-ADM-01
-         * Content: Verify seeded admin credential ('admin' / 'admin123') authenticates cleanly.
+         * Content: Verify seeded admin credential ('admin' / 'Admin123') authenticates cleanly.
          * Steps:
-         *   1. Check that the seeded 'admin' account exists and still uses default password 'admin123'.
-         *   2. Call authService.login("admin", "admin123", UserRole.ADMIN).
+         *   1. Check that the seeded 'admin' account exists and still uses default password 'Admin123'.
+         *   2. Call authService.login("admin", "Admin123", UserRole.ADMIN).
          * Expected Result:
          *   - LoginStatus.SUCCESS with non-null User whose role is ADMIN.
          *   (Uses JUnit Assumptions so the test skips gracefully if you changed the seeded password.)
@@ -242,10 +242,10 @@ public class AdminPortalTest {
             User seeded = userRepository.findByUsername("admin");
             Assumptions.assumeTrue(seeded != null && seeded.isActive(),
                     "Seeded 'admin' user is absent or inactive; skipping seeded login test.");
-            Assumptions.assumeTrue(PasswordHasher.verify("admin123", seeded.getPasswordHash()),
-                    "Seeded 'admin' password differs from default 'admin123'; skipping.");
+            Assumptions.assumeTrue(PasswordHasher.verify("Admin123", seeded.getPasswordHash()),
+                    "Seeded 'admin' password differs from default 'Admin123'; skipping.");
 
-            AuthService.LoginResult result = authService.login("admin", "admin123", UserRole.ADMIN);
+            AuthService.LoginResult result = authService.login("admin", "Admin123", UserRole.ADMIN);
 
             assertEquals(AuthService.LoginStatus.SUCCESS, result.status());
             assertNotNull(result.user());
