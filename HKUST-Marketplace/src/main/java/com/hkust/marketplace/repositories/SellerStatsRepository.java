@@ -32,6 +32,20 @@ public class SellerStatsRepository {
     public record Stats(long views, long offersReceived, long completedDeals, Double averageRating,
                         Map<String, Long> listingsByCategory, Map<ListingStatus, Long> listingsByStatus) {}
 
+    /**
+     * Calculates the seller's statistics using a new connection from the database manager.
+     *
+     * <p>Listing metrics count only non-removed listings ({@code listingStatus <> 'REMOVED'})
+     * and their views; status counts are keyed by each status present. Deal metrics count every
+     * deal whose {@code seller_username} matches, including declined and cancelled ones, so a
+     * permanently deleted seller (whose username was set to NULL) reports none. The average
+     * rating ignores reviews with {@code hidden = TRUE}.
+     *
+     * @param username the seller's username
+     * @return the aggregated statistics; the average rating is {@code null} when the seller has
+     *         no visible reviews, and the maps are empty when there are no listings
+     * @throws SQLException when the queries fail
+     */
     public Stats findBySeller(String username) throws SQLException {
         String listingsSql = """
                 SELECT category, listingStatus, COUNT(*) AS listing_count, SUM(view_count) AS views

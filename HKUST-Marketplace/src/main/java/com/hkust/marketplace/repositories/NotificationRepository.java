@@ -35,9 +35,13 @@ public class NotificationRepository {
     private static final int MAX_MESSAGE = 4000;
 
     /**
-     * Inserts one notification for its recipient. A missing id and timestamp are filled
-     * in (UUID / now); the notification is stored with its current read flag.
+     * Inserts one notification for its recipient using a new connection.
      *
+     * <p>A missing id and timestamp are filled in (UUID / now); the notification is stored with
+     * its current read flag.
+     *
+     * @param notification the notification to insert; a missing id and timestamp are set on the
+     *        object
      * @throws IllegalArgumentException when required text is blank or too long
      * @throws SQLException when the insert fails (including a missing user foreign key)
      */
@@ -48,13 +52,32 @@ public class NotificationRepository {
         }
     }
 
-    /** Persist using the caller's connection; never commit, roll back, or close it. */
+    /**
+     * Persist using the caller's connection; never commit, roll back, or close it.
+     *
+     * <p>Validation and id/timestamp filling match {@link #create(Notification)}.
+     *
+     * @param connection an open connection; the caller owns its lifecycle
+     * @param notification the notification to insert
+     * @throws IllegalArgumentException when the connection or notification is null, or
+     *         required text is blank/too long
+     * @throws SQLException when the insert fails
+     */
     public void create(Connection connection, Notification notification) throws SQLException {
         if (connection == null) throw new IllegalArgumentException("A connection is required.");
         insert(connection, notification, prepare(notification));
     }
 
-    /** Use a current read when checking a delivery ID after acquiring the deal lock. */
+    /**
+     * Use a current read when checking a delivery ID after acquiring the deal lock.
+     *
+     * <p>Reads with {@code FOR UPDATE} on the caller's connection; this method never commits.
+     *
+     * @param connection an open connection with auto-commit disabled; it is not closed
+     * @param notificationId the notification ID
+     * @return true when a notification with that ID exists
+     * @throws SQLException when the query fails
+     */
     public boolean existsForUpdate(Connection connection, String notificationId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT id FROM notifications WHERE id = ? FOR UPDATE")) {
@@ -105,12 +128,32 @@ public class NotificationRepository {
             }
         }
     }
-    /** Newest-first inbox for one recipient (uses idx_notifications_recipient). */
+    /**
+     * Newest-first unread inbox for one recipient (uses idx_notifications_recipient).
+     *
+     * <p>Equivalent to {@code findByRecipient(username, false)}.
+     *
+     * @param username the recipient username
+     * @return the unread notifications, newest first; never {@code null}
+     * @throws IllegalArgumentException when {@code username} is blank
+     * @throws SQLException when the query fails
+     */
     public List<Notification> findByRecipient(String username) throws SQLException {
         return findByRecipient(username, false);
     }
 
-    /** Optionally include read history without changing existing unread-only callers. */
+    /**
+     * Optionally include read history without changing existing unread-only callers.
+     *
+     * <p>Uses a new connection. Results are ordered newest first, then by ID; with
+     * {@code includeRead = false} only rows with {@code isRead = FALSE} are returned.
+     *
+     * @param username the recipient username
+     * @param includeRead true to include already read notifications
+     * @return matching notifications, newest first; never {@code null}
+     * @throws IllegalArgumentException when {@code username} is blank
+     * @throws SQLException when the query fails
+     */
     public List<Notification> findByRecipient(String username, boolean includeRead) throws SQLException {
         if (username == null || username.isBlank()) {
             throw new IllegalArgumentException("A recipient username is required.");
@@ -134,9 +177,12 @@ public class NotificationRepository {
     }
 
     /**
-     * Marks one notification as read.
+     * Marks one notification as read, using a new connection.
      *
+     * @param notificationId the notification to mark
      * @return true when an unread notification with that id was changed
+     * @throws IllegalArgumentException when {@code notificationId} is blank
+     * @throws SQLException when the update fails
      */
     public boolean markAsRead(String notificationId) throws SQLException {
         if (notificationId == null || notificationId.isBlank()) {
@@ -150,7 +196,17 @@ public class NotificationRepository {
         }
     }
 
-    /** Scope a portal action to its authenticated recipient. */
+    /**
+     * Scope a portal action to its authenticated recipient: marks all of one recipient's unread
+     * notifications as read.
+     *
+     * <p>Uses a new connection. The username is used as supplied; the caller is expected to pass
+     * the authenticated name.
+     *
+     * @param username the recipient whose unread notifications are changed
+     * @return the number of notification rows updated
+     * @throws SQLException when the update fails
+     */
     public int markAllAsRead(String username) throws SQLException {
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(
@@ -160,6 +216,17 @@ public class NotificationRepository {
         }
     }
 
+    /**
+     * Marks one notification as read only when it belongs to the supplied recipient.
+     *
+     * <p>Uses a new connection; already read notifications are not counted.
+     *
+     * @param notificationId the notification to mark
+     * @param username the recipient that must own the notification
+     * @return true when exactly one unread row for that recipient was updated
+     * @throws IllegalArgumentException when either argument is blank
+     * @throws SQLException when the update fails
+     */
     public boolean markAsRead(String notificationId, String username) throws SQLException {
         if (notificationId == null || notificationId.isBlank() || username == null || username.isBlank()) {
             throw new IllegalArgumentException("A notification ID and recipient are required.");
@@ -177,7 +244,15 @@ public class NotificationRepository {
      * Creates the same notification for every active admin account (admin audit feed:
      * listing submissions, account changes, reports).
      *
-     * @return the number of admin notifications created
+     * <p>Uses a new connection; no explicit transaction is started, so the inserts are not
+     * committed together.
+     *
+     * @param category the notification category
+     * @param title the notification title
+     * @param message the notification message
+     * @return the number of active admins that received a notification
+     * @throws IllegalArgumentException when required text is blank or too long
+     * @throws SQLException when the admin lookup or an insert fails
      */
     public int notifyAllAdmins(String category, String title, String message) throws SQLException {
         try (Connection conn = DatabaseManager.getConnection()) {
@@ -185,6 +260,20 @@ public class NotificationRepository {
         }
     }
 
+    /**
+     * Creates the same notification for every active admin using the caller's connection.
+     *
+     * <p>Never commits, rolls back, or closes the connection; the caller's transaction boundary
+     * applies. Text limits and validation match {@link #create(Connection, Notification)}.
+     *
+     * @param conn an open connection; the caller owns its lifecycle
+     * @param category the notification category
+     * @param title the notification title
+     * @param message the notification message
+     * @return the number of active admins that received a notification
+     * @throws IllegalArgumentException when required text is blank or too long
+     * @throws SQLException when the admin lookup or an insert fails
+     */
     public int notifyAllAdmins(Connection conn, String category, String title, String message) throws SQLException {
         String safeCategory = requiredText(category, "A notification category", MAX_CATEGORY);
         String safeTitle = requiredText(title, "A notification title", MAX_TITLE);

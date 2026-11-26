@@ -38,6 +38,12 @@ public class DealRepository {
      */
     @FunctionalInterface
     public interface ConnectionProvider {
+        /**
+         * Returns a connection for one deal operation.
+         *
+         * @return an open connection that the caller closes
+         * @throws SQLException when a connection cannot be obtained
+         */
         Connection getConnection() throws SQLException;
     }
 
@@ -47,22 +53,69 @@ public class DealRepository {
     private static final String NEWEST_FIRST = " ORDER BY d.createdDate DESC, d.id ASC";
     private static final String OPEN_STATUSES = "('PENDING','COUNTERED','ACCEPTED')";
 
+    /**
+     * Creates a repository backed by {@link DatabaseManager#getConnection()}.
+     */
     public DealRepository() { this(DatabaseManager::getConnection); }
 
+    /**
+     * Creates a repository using the supplied connection provider.
+     *
+     * @param connections the provider used for every deal operation; must not be {@code null}
+     * @throws NullPointerException when {@code connections} is {@code null}
+     */
     public DealRepository(ConnectionProvider connections) {
         this.connections = Objects.requireNonNull(connections);
     }
 
+    /**
+     * Returns one deal by ID, excluding double-deleted records.
+     *
+     * <p>Uses a new connection and joins the listing title. Deals with {@code deleted = 2} are
+     * not returned; {@code deleted = 1} records remain visible.
+     *
+     * @param id the deal ID
+     * @return the deal, or {@link Optional#empty()} when it does not exist or is double-deleted
+     * @throws IllegalArgumentException when the ID is blank or longer than 50 code points
+     * @throws SQLException when the query fails
+     */
     public Optional<Deal> findById(String id) throws SQLException {
         requireIdentifier(id, "Deal ID");
         return query("WHERE d.id = ?", List.of(id)).stream().findFirst();
     }
 
+    /**
+     * Returns the deals in which the user is the buyer, excluding double-deleted records.
+     *
+     * <p>Uses a new connection. Rows with {@code deleted = 2} are excluded, while
+     * {@code deleted = 1} rows remain visible to the remaining participant. Reads are not
+     * authorization; the service must check the caller's access.
+     *
+     * @param username the buyer's username
+     * @return the buyer's deals, newest first; never {@code null}
+     * @throws IllegalArgumentException when the username is blank or longer than 50 code points
+     * @throws SQLException when the query fails
+     */
     public List<Deal> findByBuyer(String username) throws SQLException {
         requireIdentifier(username, "Buyer username");
         return query("WHERE d.buyer_username = ?", List.of(username));
     }
 
+    /**
+     * Returns the buyer's closed deals ({@code COMPLETED} or {@code RETURNED}) with review data
+     * for the history screen.
+     *
+     * <p>Uses a new connection. Each entry carries the listing title/category, seller username
+     * and full name (possibly {@code null} after a permanent user deletion), the close time
+     * ({@code returnedDate}, else {@code completedDate}), the stored deal type and status, the
+     * agreed terms, and the review rating/comment/seller reply plus its {@code hidden} flag
+     * (hidden reviews are included). Rows are not filtered by the {@code deleted} counter, and
+     * no identifier validation is performed.
+     *
+     * @param username the buyer's username
+     * @return closed deals for the buyer, newest close time first; never {@code null}
+     * @throws SQLException when the query fails or a stored deal type/status is unknown
+     */
     public List<DealHistoryEntry> findBuyerHistory(String username) throws SQLException {
         String sql = """
                 SELECT d.id, l.itemName, l.category, d.seller_username, u.full_name,
@@ -93,11 +146,32 @@ public class DealRepository {
         }
     }
 
+    /**
+     * Returns the deals in which the user is the seller, excluding double-deleted records.
+     *
+     * <p>Uses a new connection. Rows with {@code deleted = 2} are excluded, while
+     * {@code deleted = 1} rows remain visible to the remaining participant.
+     *
+     * @param username the seller's username
+     * @return the seller's deals, newest first; never {@code null}
+     * @throws IllegalArgumentException when the username is blank or longer than 50 code points
+     * @throws SQLException when the query fails
+     */
     public List<Deal> findBySeller(String username) throws SQLException {
         requireIdentifier(username, "Seller username");
         return query("WHERE d.seller_username = ?", List.of(username));
     }
 
+    /**
+     * Returns the deals proposed for one listing, excluding double-deleted records.
+     *
+     * <p>Uses a new connection; all statuses are included.
+     *
+     * @param listingId the listing ID
+     * @return the listing's deals, newest first; never {@code null}
+     * @throws IllegalArgumentException when the listing ID is blank or longer than 50 code points
+     * @throws SQLException when the query fails
+     */
     public List<Deal> findByListing(String listingId) throws SQLException {
         requireIdentifier(listingId, "Listing ID");
         return query("WHERE d.listing_id = ?", List.of(listingId));
@@ -108,6 +182,15 @@ public class DealRepository {
      * pending/countered/accepted records are affected, including ongoing borrowing. This does not mean
      * they can all be cancelled: the service must decide which changes are allowed.
      * Terminal history (DECLINED, COMPLETED, RETURNED, CANCELLED) is excluded.
+     *
+     * <p>Uses a new connection and does not lock; see
+     * {@link #findAffectedDeals(Connection, String)} for the recheck applied inside a transaction.
+     * Rows with {@code deleted = 2} are excluded.
+     *
+     * @param listingId the listing ID
+     * @return the open (PENDING/COUNTERED/ACCEPTED) deals, newest first; never {@code null}
+     * @throws IllegalArgumentException when the listing ID is blank or longer than 50 code points
+     * @throws SQLException when the query fails
      */
     public List<Deal> findAffectedDeals(String listingId) throws SQLException {
         requireIdentifier(listingId, "Listing ID");
@@ -120,6 +203,17 @@ public class DealRepository {
      * or roll back. Lock the listing first, matching create(), so a concurrent create
      * cannot add a deal between this check and the listing update.
      * A confirmation preview alone must never authorize cancellation of new deals.
+     *
+     * <p>The listing row is locked with {@code FOR UPDATE} first, then the open deals are read
+     * with {@code FOR UPDATE}. The caller owns the connection and its commit/rollback.
+     *
+     * @param connection an open connection with auto-commit disabled; it is not closed
+     * @param listingId the listing whose open deals are rechecked
+     * @return the locked open (PENDING/COUNTERED/ACCEPTED) deals with {@code deleted < 2}, newest
+     *         first; never {@code null}
+     * @throws IllegalArgumentException when the connection is not transactional, the listing ID is
+     *         invalid, or the listing does not exist
+     * @throws SQLException when the queries fail
      */
     public List<Deal> findAffectedDeals(Connection connection, String listingId) throws SQLException {
         requireTransaction(connection);
@@ -143,7 +237,25 @@ public class DealRepository {
         return affected;
     }
 
-    /** Optional filters; created-date bounds are inclusive. Keyword is literal text. */
+    /**
+     * Optional filters; created-date bounds are inclusive. Keyword is literal text.
+     *
+     * <p>Uses a new connection. The keyword is matched with {@code LOCATE} against the listing
+     * title, buyer username, seller username and deal ID (case sensitivity follows the database
+     * collation); blank/null filters are ignored. {@code type} is mapped to the stored deal type
+     * and {@code status} to a known {@link DealStatus} name (case-insensitive). Rows with
+     * {@code deleted = 2} are excluded.
+     *
+     * @param keyword literal text to find, or {@code null}/blank for no keyword filter
+     * @param type the listing type to match, or {@code null} for all types
+     * @param status the deal status name to match, or {@code null}/blank for all statuses
+     * @param from inclusive earliest created date, or {@code null} for unbounded
+     * @param to inclusive latest created date, or {@code null} for unbounded
+     * @return matching deals, newest first; never {@code null}
+     * @throws IllegalArgumentException when {@code from} is after {@code to} or {@code status}
+     *         is not a known deal status
+     * @throws SQLException when the query fails
+     */
     public List<Deal> searchDeals(String keyword, ListingType type, String status,
                                   LocalDate from, LocalDate to) throws SQLException {
         if (from != null && to != null && from.isAfter(to)) {
@@ -179,6 +291,16 @@ public class DealRepository {
      * Persist a new PENDING proposal. Does not perform acceptance, listing
      * reservation, notification, or chat transitions.
      * The service must authenticate the buyer before calling this method.
+     *
+     * <p>Opens and commits its own transaction. The generated/returned ID, canonical seller,
+     * {@code PENDING} status, row version and creation time are written back onto the deal.
+     *
+     * @param deal the proposal to insert
+     * @return the new deal's ID
+     * @throws IllegalArgumentException when the proposal is null or invalid (status not
+     *         {@code PENDING}, bad price, bad borrow period, already countered/completed, or the
+     *         buyer/listing/seller eligibility checks fail)
+     * @throws SQLException when the insert fails; the transaction is rolled back
      */
     public String create(Deal deal) throws SQLException {
         try (Connection connection = connections.getConnection()) {
@@ -195,7 +317,21 @@ public class DealRepository {
         }
     }
 
-    /** Insert a proposal within the caller's deal/notification transaction. */
+    /**
+     * Insert a proposal within the caller's deal/notification transaction.
+     *
+     * <p>The caller owns the connection and commit/rollback. The buyer, listing and seller are
+     * validated on the same transaction, the listing is locked with {@code FOR UPDATE}, and a
+     * second accepted deal for the listing is rejected. The deal's ID, canonical seller,
+     * {@code PENDING} status, row version ({@code 1}) and creation time are set on the object.
+     *
+     * @param connection an open connection with auto-commit disabled; it is not closed
+     * @param deal the proposal to insert
+     * @return the new deal's ID
+     * @throws IllegalArgumentException when the connection is not transactional or the proposal
+     *         is invalid
+     * @throws SQLException when the insert fails
+     */
     public String create(Connection connection, Deal deal) throws SQLException {
         requireTransaction(connection);
         if (deal == null) throw new IllegalArgumentException("A deal is required.");
@@ -348,7 +484,20 @@ public class DealRepository {
         }
     }
 
-    /** Lock listing before deal, consistently with creation and affected-deal checks. */
+    /**
+     * Lock listing before deal, consistently with creation and affected-deal checks.
+     *
+     * <p>Caller-owned transaction: this method never commits. The row is read with
+     * {@code FOR UPDATE} and double-deleted records are treated as absent.
+     *
+     * @param connection an open connection with auto-commit disabled; it is not closed
+     * @param id the deal ID
+     * @return the locked deal, or {@link Optional#empty()} when it does not exist, is
+     *         double-deleted, or its listing disappeared
+     * @throws IllegalArgumentException when the connection is not transactional or the ID is
+     *         invalid
+     * @throws SQLException when the queries fail
+     */
     public Optional<Deal> findByIdForUpdate(Connection connection, String id) throws SQLException {
         requireTransaction(connection);
         requireIdentifier(id, "Deal ID");
@@ -381,6 +530,24 @@ public class DealRepository {
      * the transaction, including related listing updates and notification delivery.
      * Pass the row version shown to the actor. False means the deal disappeared or
      * its status/terms changed since that read; reload instead of silently retrying.
+     *
+     * <p>The deal and its listing are re-read with {@code FOR UPDATE}; on success the guarded
+     * update advances {@code row_version}, stores the completion/return time, and, when accepting
+     * a counter, adopts the counter terms while retaining the counter history.
+     *
+     * @param connection an open connection with auto-commit disabled; caller owns it
+     * @param id the deal ID
+     * @param expected the status the actor saw; must allow the transition to {@code next}
+     * @param expectedVersion the {@code row_version} the actor saw
+     * @param next the target status; {@code COUNTERED} must be written through
+     *        {@link #updateProposal(Connection, String, DealStatus, long, Double, LocalDateTime, LocalDateTime)}
+     * @param occurredAt the action time stored for completion or return
+     * @return true when the guarded update matched the expected status and version and was
+     *         applied; false when the deal disappeared or changed since the read
+     * @throws IllegalArgumentException when the connection is not transactional, the transition is
+     *         not allowed, the timestamp precedes creation, completion/return does not match the
+     *         deal type, return precedes borrowing, or acceptance validation fails
+     * @throws SQLException when any statement fails
      */
     public boolean updateStatus(Connection connection, String id, DealStatus expected,
                                 long expectedVersion, DealStatus next, LocalDateTime occurredAt) throws SQLException {
@@ -438,7 +605,27 @@ public class DealRepository {
         }
     }
 
-    /** Seller counteroffer; stale versions return false. Authorization and commit belong to the service. */
+    /**
+     * Seller counteroffer; stale versions return false. Authorization and commit belong to the
+     * service.
+     *
+     * <p>The deal and its listing are re-read with {@code FOR UPDATE}. On success the deal becomes
+     * {@code COUNTERED} with the supplied terms and an incremented {@code row_version}; a
+     * giveaway claim can never be countered. The caller owns the connection and transaction.
+     *
+     * @param connection an open connection with auto-commit disabled; caller owns it
+     * @param id the deal ID
+     * @param expected the status the seller saw ({@code PENDING} or {@code COUNTERED})
+     * @param expectedVersion the {@code row_version} the seller saw
+     * @param counterPrice the counter sale price for a sale, or {@code null} for borrowing
+     * @param counterStart the counter borrowing start, required for borrowing
+     * @param counterEnd the counter borrowing due time, required for borrowing
+     * @return true when the guarded update matched and was applied; false when the deal
+     *         disappeared or changed since the read
+     * @throws IllegalArgumentException when the connection is not transactional, the status is not
+     *         counterable, the terms do not match the deal type, or a giveaway is countered
+     * @throws SQLException when any statement fails
+     */
     public boolean updateProposal(Connection connection, String id, DealStatus expected,
                                   long expectedVersion, Double counterPrice, LocalDateTime counterStart,
                                   LocalDateTime counterEnd) throws SQLException {
@@ -479,13 +666,35 @@ public class DealRepository {
         }
     }
 
-    /** Candidates only: the worker must lock/recheck each deal before returning it. */
+    /**
+     * Candidates only: the worker must lock/recheck each deal before returning it.
+     *
+     * <p>Returns accepted borrowing deals whose due time is at or before {@code cutoff},
+     * excluding double-deleted rows. Uses a new connection.
+     *
+     * @param cutoff the inclusive due-time threshold
+     * @return candidate deals, newest first; never {@code null}
+     * @throws NullPointerException when {@code cutoff} is {@code null}
+     * @throws SQLException when the query fails
+     */
     public List<Deal> findDueBorrowings(LocalDateTime cutoff) throws SQLException {
         Objects.requireNonNull(cutoff, "A cutoff is required.");
         return query("WHERE d.dealType = 'BORROWED' AND d.status = 'ACCEPTED' "
                 + "AND d.borrowDueDate <= ?", List.of(dateTimestamp(cutoff)));
     }
 
+    /**
+     * Returns accepted borrowing deals due strictly after {@code now} and strictly before
+     * {@code cutoff}, excluding double-deleted rows.
+     *
+     * <p>Uses a new connection; the caller decides when to warn and must recheck a deal before
+     * acting on it.
+     *
+     * @param now exclusive lower bound on the due time
+     * @param cutoff exclusive upper bound on the due time
+     * @return candidate deals, newest first; never {@code null}
+     * @throws SQLException when the query fails
+     */
     public List<Deal> findBorrowingsNearingDueDate(LocalDateTime now, LocalDateTime cutoff) throws SQLException {
         return query("WHERE d.dealType = 'BORROWED' AND d.status = 'ACCEPTED' "
                 + "AND d.borrowDueDate > ? AND d.borrowDueDate < ?",

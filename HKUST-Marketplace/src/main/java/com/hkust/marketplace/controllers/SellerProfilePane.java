@@ -20,10 +20,31 @@ public final class SellerProfilePane extends VBox {
         load();
     }
 
+    /**
+     * Creates a read-only feedback pane for a listing detail view.
+     *
+     * <p>The seller's public profile is loaded asynchronously through
+     * {@link com.hkust.marketplace.services.ReviewService#getPublicProfile(String)}. The pane
+     * shows the average rating, public reviews, and a "Seller Profile" button that opens the
+     * full profile dialog; failed loads offer a Retry button. Must be created on the JavaFX
+     * Application Thread.
+     *
+     * @param username seller account whose feedback is displayed
+     * @return a new pane that loads its content in the background
+     */
     public static SellerProfilePane listingFeedback(String username) {
         return new SellerProfilePane(username, false);
     }
 
+    /**
+     * Creates a "Seller Profile" button that opens the full public profile in a modal dialog.
+     *
+     * <p>The dialog is owned by the button's window and loads the same public feedback
+     * asynchronously. The button is disabled when no username is supplied.
+     *
+     * @param username seller account to display, or {@code null} to return a disabled button
+     * @return a configured button that is not yet attached to a scene
+     */
     public static Button profileButton(String username) {
         Button button = new Button("Seller Profile");
         button.getStyleClass().add("btn-outline");

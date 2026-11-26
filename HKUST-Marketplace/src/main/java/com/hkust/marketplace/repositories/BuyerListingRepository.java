@@ -26,18 +26,43 @@ public class BuyerListingRepository {
      */
     @FunctionalInterface
     public interface ConnectionProvider {
+        /**
+         * Returns a connection for one buyer-listing operation.
+         *
+         * @return an open connection that the caller closes
+         * @throws SQLException when a connection cannot be obtained
+         */
         Connection getConnection() throws SQLException;
     }
 
     private static final String VISIBLE_STATUSES = "('LIVE', 'RESERVED', 'SOLD', 'LENT', 'GIVEN')";
     private final ConnectionProvider connections;
 
+    /**
+     * Creates a repository backed by {@link DatabaseManager#getConnection()}.
+     */
     public BuyerListingRepository() { this(DatabaseManager::getConnection); }
 
+    /**
+     * Creates a repository using the supplied connection provider.
+     *
+     * @param connections the provider used for every buyer query; must not be {@code null}
+     * @throws NullPointerException when {@code connections} is {@code null}
+     */
     public BuyerListingRepository(ConnectionProvider connections) {
         this.connections = Objects.requireNonNull(connections);
     }
 
+    /**
+     * Returns every live listing card, newest first.
+     *
+     * <p>Only {@code LIVE} listings owned by an active {@code SELLER} are included. Each result
+     * carries just the first saved photo as a thumbnail, not the full gallery. Uses one
+     * connection from the provider.
+     *
+     * @return the live listing cards; never {@code null}
+     * @throws SQLException when the query fails
+     */
     public List<Listing> findLiveListings() throws SQLException {
         // A card needs only the first saved photo; do not load all six images per listing.
         String sql = """
@@ -64,10 +89,36 @@ public class BuyerListingRepository {
         return result;
     }
 
+    /**
+     * Returns a visible listing without a viewer and counts one view.
+     *
+     * <p>Equivalent to {@code findVisibleById(id, null)}.
+     *
+     * @param id the listing ID
+     * @return the listing with its photos, or {@code null} when it is not visible
+     * @throws SQLException when any statement fails; the transaction is rolled back
+     * @see #findVisibleById(String, String)
+     */
     public Listing findVisibleById(String id) throws SQLException {
         return findVisibleById(id, null);
     }
 
+    /**
+     * Returns a buyer-visible listing, counts one view atomically, and loads up to six photos.
+     *
+     * <p>Visible statuses are {@code LIVE}, {@code RESERVED}, {@code SOLD}, {@code LENT} and
+     * {@code GIVEN}, and the seller must be an active {@code SELLER}. A guarded view-count update
+     * runs first, so a missing or no-longer-visible listing returns {@code null} without loading
+     * photos. The work runs in a repeatable-read transaction owned and committed by this method.
+     * {@code row_version} is deliberately not changed, so views never invalidate a seller's
+     * optimistic-lock check. Agreed deal terms are attached only when {@code viewer} is the
+     * buyer on the accepted/completed deal.
+     *
+     * @param id the listing ID
+     * @param viewer the buyer username used to attach agreed terms, or {@code null} for none
+     * @return the listing with its photos, or {@code null} when it is not visible
+     * @throws SQLException when any statement fails; the transaction is rolled back
+     */
     public Listing findVisibleById(String id, String viewer) throws SQLException {
         // The guarded update counts every successful buyer detail opening, including
         // repeated openings by the same buyer. It does not bump row_version: views
@@ -119,7 +170,23 @@ public class BuyerListingRepository {
         }
     }
 
-    /** Returns the reported listing title after committing, without counting another view. */
+    /**
+     * Records a buyer's report against a visible listing and returns the reported title.
+     *
+     * <p>Uses its own transaction. The buyer row is checked with {@code FOR SHARE} and must be
+     * an active {@code BUYER}; the visible listing row is then locked with {@code FOR SHARE} and
+     * must have an active {@code SELLER}. A report row is inserted and committed. No duplicate
+     * check is performed, so the same buyer may report a listing more than once, and no extra
+     * view is counted.
+     *
+     * @param buyer the reporting buyer's username
+     * @param listingId the listing being reported
+     * @param reason the free-text reason stored with the report as supplied
+     * @return the listing title captured at report time
+     * @throws IllegalArgumentException when the buyer is not an active buyer or the listing is
+     *         not visible to buyers
+     * @throws SQLException when any statement fails; the transaction is rolled back
+     */
     public String reportListing(String buyer, String listingId, String reason) throws SQLException {
         try (Connection connection = connections.getConnection()) {
             connection.setAutoCommit(false);

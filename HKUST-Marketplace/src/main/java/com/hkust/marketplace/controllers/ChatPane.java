@@ -37,10 +37,38 @@ public class ChatPane extends VBox {
     private String activeSearch="";
     private static final DateTimeFormatter DATE=DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm:ss");
 
+    /**
+     * Creates a conversation view without a formal-proposal action.
+     *
+     * <p>Equivalent to passing {@code null} for the proposal callback in
+     * {@link #ChatPane(ChatService, Supplier, String, Runnable, Runnable)}.
+     *
+     * @param service chat service used for reads and sends; must not be {@code null}
+     * @param user supplier of the currently signed-in user, evaluated on each operation; must
+     *        not be {@code null}
+     * @param threadId chat thread to display; must not be {@code null}
+     * @param back action invoked when "Back to Chats" is clicked; must not be {@code null}
+     */
     public ChatPane(ChatService service,Supplier<User> user,String threadId,Runnable back) {
         this(service,user,threadId,back,null);
     }
 
+    /**
+     * Creates a conversation view and starts its four-second polling loop.
+     *
+     * <p>When {@code propose} is non-null and the current user is a buyer, a "Make Formal
+     * Proposal" button is shown. All persistence goes through {@link ChatService}; the pane
+     * never modifies the database directly, and the service re-authorizes every read and send.
+     * Must be created on the JavaFX Application Thread.
+     *
+     * @param service chat service used for reads and sends; must not be {@code null}
+     * @param user supplier of the currently signed-in user, evaluated on each operation; must
+     *        not be {@code null}
+     * @param threadId chat thread to display; must not be {@code null}
+     * @param back action invoked when "Back to Chats" is clicked; must not be {@code null}
+     * @param propose action invoked by the "Make Formal Proposal" button; may be {@code null}
+     *        to omit that button
+     */
     public ChatPane(ChatService service,Supplier<User> user,String threadId,Runnable back,Runnable propose) {
         super(12);this.service=Objects.requireNonNull(service);this.user=Objects.requireNonNull(user);this.threadId=Objects.requireNonNull(threadId);
         setPadding(new Insets(4));heading.setStyle("-fx-font-size: 18px; -fx-font-weight: bold;");
@@ -77,7 +105,21 @@ public class ChatPane extends VBox {
         polling=new Timeline(new KeyFrame(Duration.seconds(4),e->{if(!loading&&!saving)load(false);}));polling.setCycleCount(Timeline.INDEFINITE);polling.play();
     }
 
+    /**
+     * Stops polling and marks the conversation view inactive.
+     *
+     * <p>Invalidates in-flight loads and sends so their results are ignored. Call when
+     * navigating away from the conversation; the pane cannot be reactivated.
+     */
     public void deactivate(){active=false;request++;polling.stop();}
+
+    /**
+     * Reloads the conversation, honouring the current search filter.
+     *
+     * <p>Runs asynchronously and is a no-op while the pane is inactive or a load or send is in
+     * progress. Authorization is performed by {@link ChatService}; a failure leaves the last
+     * rendered history in place and displays an error message.
+     */
     public void refresh(){load(true);}
 
     private void load(boolean explicit) {

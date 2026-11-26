@@ -38,16 +38,46 @@ public class NotificationBoard extends ScrollPane {
     private boolean active;
     private long notificationRequest;
 
+    /**
+     * Creates a notification board that reports no change notifications.
+     *
+     * <p>Equivalent to calling
+     * {@link #NotificationBoard(NotificationService, Runnable)} with a no-op callback.
+     *
+     * @param notifications service used to load and mark notifications; must not be
+     *        {@code null}
+     */
     public NotificationBoard(NotificationService notifications) {
         this(notifications, () -> {});
     }
 
+    /**
+     * Creates a notification board.
+     *
+     * @param notifications service used to load and mark notifications; must not be
+     *        {@code null}
+     * @param onNotificationsChanged callback run on the JavaFX Application Thread after the
+     *        board reloads or marks notifications as read; must not be {@code null}
+     */
     public NotificationBoard(NotificationService notifications, Runnable onNotificationsChanged) {
         this.notifications = notifications;
         this.onNotificationsChanged = onNotificationsChanged;
         setFitToWidth(true);
     }
 
+    /**
+     * Activates the board and renders the inbox for the given recipient.
+     *
+     * <p>The toolbar and an asynchronous load of unread notifications (or the full history when
+     * the "Show read notifications" box is selected) are created through
+     * {@link NotificationService#getNotifications(User, boolean)}. Only the newest request is
+     * applied: results are ignored once the board is deactivated or the session's current user
+     * is no longer the recipient. Loads and mark-read operations run on daemon background
+     * threads, while UI updates happen on the JavaFX Application Thread. Must be called on the
+     * JavaFX Application Thread; repeated calls refresh the content.
+     *
+     * @param recipient user whose notifications are displayed
+     */
     public void show(User recipient) {
         active = true;
         long request = ++notificationRequest;
@@ -110,6 +140,12 @@ public class NotificationBoard extends ScrollPane {
         return request == notificationRequest && isActiveFor(recipient);
     }
 
+    /**
+     * Deactivates the board and invalidates any in-flight load or mark-read update.
+     *
+     * <p>Call when leaving the portal screen so background results for the previous recipient
+     * are ignored. The board can be shown again with {@link #show(User)}.
+     */
     public void deactivate() {
         active = false;
         notificationRequest++;

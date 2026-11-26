@@ -48,7 +48,21 @@ public class ListingRepository {
         return listing;
     }
 
-    /** Reserve a LIVE listing as part of the same transaction that accepts its deal. */
+    /**
+     * Reserve a LIVE listing as part of the same transaction that accepts its deal.
+     *
+     * <p>Caller-owned connection: this method never commits. The update matches only a listing
+     * owned by {@code sellerUsername} that is still {@code LIVE}, sets it to
+     * {@code RESERVED}, and increments {@code row_version}.
+     *
+     * @param connection an open connection with auto-commit disabled; it is not closed
+     * @param listingId the listing to reserve
+     * @param sellerUsername the expected seller of the listing
+     * @return true when exactly one LIVE listing was reserved, false when it is missing, not
+     *         owned by the seller, or no longer LIVE
+     * @throws IllegalArgumentException when the connection is null or auto-commit is enabled
+     * @throws SQLException when the update fails
+     */
     public boolean reserveForDeal(Connection connection, String listingId, String sellerUsername) throws SQLException {
         if (connection == null || connection.getAutoCommit()) {
             throw new IllegalArgumentException("Reserving a listing requires a transaction.");
@@ -67,6 +81,17 @@ public class ListingRepository {
      * Save a new listing and its 0-6 images together.
      * The service supplies the ID, seller, validated fields, and Pending Review status.
      * Both tables are rolled back if saving fails.
+     *
+     * <p>The connection and transaction are owned by this method; the listing row and its photo
+     * rows are committed together.
+     *
+     * @param listing the listing to insert; its ID, seller, type and status must already be set
+     *        and its photos are stored in order
+     * @throws IllegalArgumentException when the ID is missing, the type is null or the status is
+     *         not {@link ListingStatus#PENDING_REVIEW}, the condition is unknown, there are more
+     *         than six photos, a photo is empty or larger than 16 MiB, or the type-specific
+     *         price/lending fields are invalid
+     * @throws SQLException when the insert fails; the transaction is rolled back
      */
     public void create(Listing listing) throws SQLException {
         //check that the service has assigned an ID before saving
@@ -172,6 +197,16 @@ public class ListingRepository {
             }
         }
     }
+    /**
+     * Returns every non-removed listing, oldest first, with its photos.
+     *
+     * <p>Uses a new connection and joins the seller's current full name from {@code users}.
+     * Listings with status {@code REMOVED} are excluded; photos are loaded on the same
+     * connection.
+     *
+     * @return non-removed listings ordered by posting time and ID; never {@code null}
+     * @throws SQLException when the query fails
+     */
     public List<Listing> findAllListing() throws SQLException {
         List<Listing> listings = new ArrayList<>();
         //read the seller's current name from users and listing
@@ -196,6 +231,17 @@ public class ListingRepository {
         }
         return listings;
     }
+    /**
+     * Returns a seller's non-removed listings, with agreed deal terms when one exists.
+     *
+     * <p>Uses a new connection. Listings with the terminal outcomes {@code SOLD}, {@code GIVEN}
+     * or {@code LENT} sort after the others, then newest first; {@code REMOVED} listings are
+     * excluded. Photos are loaded on the same connection.
+     *
+     * @param sellerUsername the seller whose listings are returned
+     * @return the seller's non-removed listings with photos; never {@code null}
+     * @throws SQLException when the query fails
+     */
     public List<Listing> findBySeller(String sellerUsername) throws SQLException {
         List<Listing> listings = new ArrayList<>();
         //read the seller's current name from users instead of storing a second copy
@@ -229,6 +275,13 @@ public class ListingRepository {
      * and reusable for other status filters (e.g. an "all live listings" view).
      * Removed listings are never returned, even when asking for
      * {@link ListingStatus#REMOVED}.
+     *
+     * <p>Uses a new connection and loads photos on the same connection.
+     *
+     * @param status the exact listing status to match
+     * @return matching non-removed listings ordered by posting time; never {@code null}
+     * @throws IllegalArgumentException when {@code status} is {@code null}
+     * @throws SQLException when the query fails
      */
     public List<Listing> findByStatus(ListingStatus status) throws SQLException {
         if (status == null) {
@@ -260,6 +313,17 @@ public class ListingRepository {
         return listings;
     }
 
+    /**
+     * Returns one non-removed listing owned by the seller, with agreed terms and photos.
+     *
+     * <p>Uses a new connection; photos are loaded on the same connection.
+     *
+     * @param id the listing ID
+     * @param sellerUsername the expected seller of the listing
+     * @return the listing, or {@code null} when it does not exist, is removed, or belongs to
+     *         another seller
+     * @throws SQLException when the query fails
+     */
     public Listing findByIdAndSeller(String id, String sellerUsername) throws SQLException {
         String sql = LISTINGS_WITH_DEAL + "WHERE l.id = ? AND l.seller_username = ?"
                 + " AND l.listingStatus <> 'REMOVED'";
@@ -277,7 +341,20 @@ public class ListingRepository {
         }
     }
 
-    /** Lock an owned row for a caller-owned seller change transaction. */
+    /**
+     * Lock an owned row for a caller-owned seller change transaction.
+     *
+     * <p>The row is read with {@code FOR UPDATE} and removed listings are excluded. This method
+     * never commits; the caller owns commit/rollback and closes the connection.
+     *
+     * @param conn an open connection with auto-commit disabled; it is not closed
+     * @param id the listing ID
+     * @param seller the expected seller username
+     * @return the locked listing, or {@code null} when no non-removed listing with that ID
+     *         belongs to the seller
+     * @throws IllegalArgumentException when {@code conn} is null or auto-commit is enabled
+     * @throws SQLException when the query fails
+     */
     public Listing findByIdAndSellerForUpdate(Connection conn, String id, String seller) throws SQLException {
         if (conn == null || conn.getAutoCommit()) throw new IllegalArgumentException("A transaction is required.");
         String sql = "SELECT l.*, u.full_name AS seller_full_name FROM listings l "
@@ -301,10 +378,18 @@ public class ListingRepository {
      * The update only succeeds while the listing is still PENDING_REVIEW and its
      * row_version still equals the version the admin reviewed, so a seller edit or a
      * second admin decision between loading the queue and deciding is detected instead
-     * of approving content nobody reviewed.
+     * of approving content nobody reviewed. Uses a new connection.
      *
+     * @param listingId the listing being reviewed
+     * @param status the review decision; approval uses {@link ListingStatus#LIVE} and rejection
+     *        uses {@link ListingStatus#REJECTED}
+     * @param rejectionReason the required rejection text when rejecting; ignored and cleared
+     *        for any other status
      * @param expectedRowVersion row_version the admin saw when the listing was loaded
      * @return true when the listing was still pending with that version and was updated
+     * @throws IllegalArgumentException when the listing ID is blank, the status is null, or a
+     *         rejection has a blank reason
+     * @throws SQLException when the update fails
      */
     public boolean updateReview(String listingId, ListingStatus status, String rejectionReason,
                                 long expectedRowVersion) throws SQLException {
@@ -347,7 +432,15 @@ public class ListingRepository {
      * Soft delete: marks one owned listing as REMOVED, keeping its row, photos and history.
      * Removed listings are excluded from every find method in this repository.
      *
+     * <p>Uses a new connection and increments {@code row_version} so a concurrent review or edit
+     * sees a conflict.
+     *
+     * @param listingId the listing to remove
+     * @param username the seller that must own the listing; it is trimmed before use
+     * @param reason the rejection reason recorded on the listing
      * @return true when the listing existed, was not already removed and was updated
+     * @throws IllegalArgumentException when the listing ID, username or reason is blank
+     * @throws SQLException when the update fails
      */
     public boolean removeListing(String listingId, String username, String reason) throws SQLException {
         if (listingId == null || listingId.isBlank()) {
@@ -391,6 +484,21 @@ public class ListingRepository {
         }
     }
 
+    /**
+     * Updates an owned listing's content and photos in one new connection and transaction.
+     *
+     * <p>The row is locked with {@code FOR UPDATE}; only listings in {@code PENDING_REVIEW},
+     * {@code LIVE} or {@code REJECTED} may be edited. The listing is sent back to Pending Review
+     * with its review result cleared and {@code row_version} incremented, and the photo set is
+     * replaced entirely (including when all photos are removed).
+     *
+     * @param id the listing ID
+     * @param seller the seller that must own the listing
+     * @param listing the new content and photo set
+     * @throws IllegalArgumentException when the row is missing, not owned by the seller, or its
+     *         status no longer allows editing
+     * @throws SQLException when any statement fails; the transaction is rolled back
+     */
     public void updateOwned(String id, String seller, Listing listing) throws SQLException {
         try (Connection conn = DatabaseManager.getConnection()) {
             conn.setAutoCommit(false);
@@ -404,7 +512,22 @@ public class ListingRepository {
         }
     }
 
-    /** Content and photo replacement without committing the caller's transaction. */
+    /**
+     * Content and photo replacement without committing the caller's transaction.
+     *
+     * <p>The caller owns the connection and commit/rollback. The row is locked with
+     * {@code FOR UPDATE}; the listing is reset to {@link ListingStatus#PENDING_REVIEW} with its
+     * review result cleared and {@code row_version} incremented, and the photo set is replaced in
+     * the same transaction.
+     *
+     * @param conn an open connection with auto-commit disabled; it is not closed
+     * @param id the listing ID
+     * @param seller the seller that must own the listing
+     * @param listing the new content and photo set
+     * @throws IllegalArgumentException when the connection is not transactional, or the row is
+     *         missing, not owned by the seller, or its status no longer allows editing
+     * @throws SQLException when any statement fails
+     */
     public void updateOwned(Connection conn, String id, String seller, Listing listing) throws SQLException {
         if (conn == null || conn.getAutoCommit()) throw new IllegalArgumentException("A transaction is required.");
         String sql = """
@@ -444,7 +567,13 @@ public class ListingRepository {
      * Unlike the seller path it accepts any current status, and the listing is sent
      * back to Pending Review with its previous review result cleared.
      *
+     * <p>Opens and commits its own transaction on a new connection; {@code row_version} is
+     * incremented.
+     *
+     * @param id the listing ID
+     * @param listing the new content and photo set
      * @return false when no listing has that id
+     * @throws SQLException when any statement fails; the transaction is rolled back
      */
     public boolean updateAsAdmin(String id, Listing listing) throws SQLException {
         try (Connection conn = DatabaseManager.getConnection()) {
@@ -467,6 +596,14 @@ public class ListingRepository {
      * The same admin content update using the caller's transaction, so related writes
      * (notifications, deal changes) commit or roll back together. The caller owns
      * commit/rollback. Returns false without writing when no listing has that id.
+     *
+     * <p>The connection is used as supplied and is never committed, rolled back or closed here.
+     *
+     * @param conn an open connection; the caller owns its lifecycle and transaction boundary
+     * @param id the listing ID
+     * @param listing the new content and photo set
+     * @return true when a listing row was updated, false when no listing has that id
+     * @throws SQLException when any statement fails
      */
     public boolean updateAsAdmin(Connection conn, String id, Listing listing) throws SQLException {
         String sql = """
@@ -502,6 +639,16 @@ public class ListingRepository {
         return true;
     }
 
+    /**
+     * Soft-removes an owned listing in one new connection and transaction, keeping its row,
+     * photos and deal history.
+     *
+     * @param id the listing ID
+     * @param seller the seller that must own the listing
+     * @throws IllegalArgumentException when the row is missing, not owned by the seller, or its
+     *         status no longer allows removal
+     * @throws SQLException when any statement fails; the transaction is rolled back
+     */
     public void deleteOwned(String id, String seller) throws SQLException {
         try (Connection conn = DatabaseManager.getConnection()) {
             conn.setAutoCommit(false);
@@ -515,7 +662,20 @@ public class ListingRepository {
         }
     }
 
-    /** Remove from marketplace while retaining deal history and its referenced listing. */
+    /**
+     * Remove from marketplace while retaining deal history and its referenced listing.
+     *
+     * <p>Caller-owned connection: this method never commits. Locks the row with
+     * {@code FOR UPDATE}, checks that its status still allows removal, then sets {@code REMOVED}
+     * and increments {@code row_version}.
+     *
+     * @param conn an open connection with auto-commit disabled; it is not closed
+     * @param id the listing ID
+     * @param seller the seller that must own the listing
+     * @throws IllegalArgumentException when the connection is not transactional, or the listing
+     *         is missing, not owned by the seller, or no longer in an editable status
+     * @throws SQLException when the row cannot be removed
+     */
     public void deleteOwned(Connection conn, String id, String seller) throws SQLException {
         if (conn == null || conn.getAutoCommit()) throw new IllegalArgumentException("A transaction is required.");
         lockChangeableListing(conn, id, seller);

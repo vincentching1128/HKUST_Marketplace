@@ -26,6 +26,12 @@ public class BuyerListingService {
 
         private final String label;
         SortOrder(String label) { this.label = label; }
+
+        /**
+         * Returns the display label used by the sort control.
+         *
+         * @return the human-readable label
+         */
         @Override public String toString() { return label; }
     }
 
@@ -33,22 +39,57 @@ public class BuyerListingService {
     private final BuyerListingRepository listings;
     private final NotificationRepository notificationRepository;
 
+    /** Creates a service backed by the default repositories. */
     public BuyerListingService() {
         this(new UserRepository(), new BuyerListingRepository(), new NotificationRepository());
     }
 
+    /**
+     * Creates a service with explicit repositories.
+     *
+     * @param users the account repository used for active-buyer checks
+     * @param listings the buyer listing repository
+     * @param notificationRepository the repository used for report notifications
+     * @throws NullPointerException if any argument is {@code null}
+     */
     public BuyerListingService(UserRepository users, BuyerListingRepository listings, NotificationRepository notificationRepository) {
         this.users = Objects.requireNonNull(users);
         this.listings = Objects.requireNonNull(listings);
         this.notificationRepository = Objects.requireNonNull(notificationRepository);
     }
 
+    /**
+     * Returns the catalogue of live listings from active sellers.
+     *
+     * <p>Only the first saved photo is loaded for each card.
+     *
+     * @param user the signed-in account; it must be an active buyer
+     * @return the live listings, newest first
+     * @throws IllegalArgumentException if the stored account is missing, inactive, or not
+     *     a buyer
+     * @throws SQLException if the account or listing query fails
+     */
     public List<Listing> getLiveListings(User user) throws SQLException {
         requireActiveBuyer(user);
         return listings.findLiveListings();
     }
 
-    /** Read a fresh listing, including approved listings that have become unavailable. */
+    /**
+     * Reads a fresh listing for the buyer detail view and records a view.
+     *
+     * <p>Listings are available while their status is Live, Reserved, Sold, Lent, or Given
+     * and the seller is still an active seller, so approved listings that have become
+     * unavailable remain viewable. The agreed deal terms are attached only when the
+     * requesting buyer is the buyer of that deal. The view counter is incremented without
+     * changing the row version.
+     *
+     * @param user the signed-in buyer
+     * @param id the listing identifier
+     * @return the visible listing including its photos
+     * @throws IllegalArgumentException if the account is not an active buyer, the id is
+     *     blank, or the listing is not visible to this buyer
+     * @throws SQLException if the account or listing query fails
+     */
     public Listing getListing(User user, String id) throws SQLException {
         User buyer = requireActiveBuyer(user);
         requireListingId(id);
@@ -59,6 +100,21 @@ public class BuyerListingService {
         return listing;
     }
 
+    /**
+     * Reports a visible listing to the administrators.
+     *
+     * <p>The reason is stripped and must contain 1 to 2,000 characters. The repository
+     * re-checks the active buyer and the visible listing under database locks and stores
+     * the report. Every active admin then receives a "Listing Reported" notification.
+     *
+     * @param user the signed-in buyer
+     * @param id the listing identifier
+     * @param reason the report reason
+     * @throws IllegalArgumentException if the account is not an active buyer, the id is
+     *     blank, the reason length is invalid, or the listing is no longer available to
+     *     report
+     * @throws SQLException if the report insert or the admin notification fails
+     */
     public void reportListing(User user, String id, String reason) throws SQLException {
         User buyer = requireActiveBuyer(user);
         requireListingId(id);
@@ -72,7 +128,29 @@ public class BuyerListingService {
                 "Listing Reported", trimmed);
     }
 
-    /** Apply combined controls without changing the loaded list or its objects. */
+    /**
+     * Filters and sorts a loaded listing list without mutating its objects.
+     *
+     * <p>Only live listings are kept. Keyword matching is case-insensitive against the
+     * title and description; category and condition are exact case-insensitive matches;
+     * type and price bounds are optional. Non-sale listings contribute a price of zero for
+     * price sorting and are excluded when a price bound is supplied. Newest-first sorting
+     * uses the posting time and then the id.
+     *
+     * @param source the listings to filter; must not be {@code null}
+     * @param keyword optional title/description keyword
+     * @param category optional exact category
+     * @param type optional listing type
+     * @param condition optional exact condition
+     * @param min optional inclusive minimum sale price
+     * @param max optional inclusive maximum sale price
+     * @param sort the ordering; {@code null} means newest first
+     * @return the matching listings in the requested order
+     * @throws IllegalArgumentException if a bound is negative, above
+     *     HK$99,999,999.99, has more than two decimal places, or {@code min} exceeds
+     *     {@code max}
+     * @throws NullPointerException if {@code source} is {@code null}
+     */
     public List<Listing> filterListings(List<Listing> source, String keyword, String category,
                                        ListingType type, String condition, BigDecimal min,
                                        BigDecimal max, SortOrder sort) {

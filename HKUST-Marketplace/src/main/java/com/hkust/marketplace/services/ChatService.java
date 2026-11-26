@@ -15,16 +15,42 @@ public class ChatService {
     private final NotificationRepository notifications;
     private final DealRepository.ConnectionProvider connections;
 
+    /** Creates a service backed by the default repositories and database connections. */
     public ChatService() {
         this(new ChatRepository(),new DealRepository(),new UserRepository(),new NotificationRepository(),DatabaseManager::getConnection);
     }
 
+    /**
+     * Creates a service with explicit collaborators; useful for tests.
+     *
+     * @param chats the chat repository
+     * @param deals the deal repository
+     * @param users the account repository
+     * @param notifications the notification repository
+     * @param connections supplies the JDBC connections whose commit and rollback this
+     *     service owns
+     * @throws NullPointerException if any argument is {@code null}
+     */
     public ChatService(ChatRepository chats, DealRepository deals, UserRepository users,
                        NotificationRepository notifications, DealRepository.ConnectionProvider connections) {
         this.chats=Objects.requireNonNull(chats); this.deals=Objects.requireNonNull(deals); this.users=Objects.requireNonNull(users);
         this.notifications=Objects.requireNonNull(notifications); this.connections=Objects.requireNonNull(connections);
     }
 
+    /**
+     * Returns the signed-in buyer's or seller's chat inbox.
+     *
+     * <p>Accepted, completed, and returned deals that have no chat thread yet are first
+     * materialised as threads for the signed-in participant. Only threads the account
+     * participates in are returned, newest activity first.
+     *
+     * @param actor the signed-in buyer or seller
+     * @return the participant's chat threads
+     * @throws IllegalArgumentException if the stored account is missing, inactive, or an
+     *     admin
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public List<ChatThread> getInbox(User actor) throws SQLException {
         return transaction(conn -> {
             User current=requireActor(conn,actor);
@@ -33,7 +59,21 @@ public class ChatService {
         });
     }
 
-    /** Reuse a listing/pair conversation across proposals and deal state changes. */
+    /**
+     * Opens or reuses the listing conversation between the buyer and seller of a deal.
+     *
+     * <p>The deal is locked and the signed-in account must be its buyer or seller. The
+     * conversation is keyed by listing and participant pair, so it is reused across
+     * later proposals and deal state changes.
+     *
+     * @param actor the signed-in buyer or seller
+     * @param dealId the deal whose participants and listing identify the conversation
+     * @return the existing or newly created thread
+     * @throws IllegalArgumentException if an identifier is invalid, the account is not an
+     *     active buyer or seller, the deal is missing, or the account is not a participant
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public ChatThread openForDeal(User actor, String dealId) throws SQLException {
         identifier(dealId);
         return transaction(conn -> {
@@ -46,7 +86,20 @@ public class ChatService {
         });
     }
 
-    /** Buyer integration point: chat can start from visible listing details before an offer exists. */
+    /**
+     * Opens or reuses a listing conversation for an active buyer before any deal exists.
+     *
+     * <p>The listing must be visible in one of the live, reserved, sold, lent, or given
+     * states, and its seller must still be an active seller.
+     *
+     * @param buyer the signed-in buyer
+     * @param listingId the listing to discuss
+     * @return the existing or newly created thread
+     * @throws IllegalArgumentException if an identifier is invalid, the account is not an
+     *     active buyer, or the listing or seller is unavailable
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public ChatThread openForListing(User buyer, String listingId) throws SQLException {
         identifier(listingId);
         return transaction(conn -> {
@@ -64,6 +117,22 @@ public class ChatService {
         });
     }
 
+    /**
+     * Returns a participant's conversation, optionally filtered by message text.
+     *
+     * <p>The search term is matched as literal text and must be at most 4,000 characters.
+     * The result reports whether the counterpart account still allows sending, so a
+     * conversation with an unavailable counterpart is presented as read-only.
+     *
+     * @param actor the signed-in buyer or seller
+     * @param threadId the conversation identifier
+     * @param search optional literal text to filter messages, or {@code null}
+     * @return the thread, its matching messages in send order, and the send capability
+     * @throws IllegalArgumentException if an identifier is invalid, the search term is too
+     *     long, the account is not an active buyer or seller, or the thread is missing or
+     *     not owned by the account
+     * @throws SQLException if any database read or write fails
+     */
     public ChatConversation getConversation(User actor, String threadId, String search) throws SQLException {
         identifier(threadId);
         if (search!=null && search.codePointCount(0,search.length())>4000) throw new IllegalArgumentException("Search text is too long.");
@@ -74,6 +143,25 @@ public class ChatService {
         });
     }
 
+    /**
+     * Appends a text message from a conversation participant and notifies the recipient.
+     *
+     * <p>The message body is stripped and must contain 1 to 4,000 characters. The account
+     * must be an active participant, and the counterpart must still exist as an active
+     * account of the opposite role; otherwise the conversation is read-only and the send
+     * is rejected. The message and the recipient's "New Chat Message" notification commit
+     * together.
+     *
+     * @param actor the signed-in sender
+     * @param threadId the conversation identifier
+     * @param text the message text
+     * @return the persisted message
+     * @throws IllegalArgumentException if an identifier or the text is invalid, the
+     *     account is not an active buyer or seller, the thread is not owned by the
+     *     account, or the other account is unavailable
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public ChatMessage sendMessage(User actor, String threadId, String text) throws SQLException {
         identifier(threadId);
         String body=text==null?"":text.strip();
@@ -92,9 +180,23 @@ public class ChatService {
     }
 
     /**
-     * Share an existing buyer PENDING proposal or seller COUNTERED proposal as an
-     * immutable formal message. Buyer submission services can call this after saving
-     * a proposal. Repeating the same deal version does not duplicate messages/notifications.
+     * Shares the sender's current proposal or counteroffer as an immutable chat message.
+     *
+     * <p>A buyer may share a Pending proposal and a seller may share a Countered
+     * counteroffer. The thread must match the deal's listing and participants. The message
+     * stores the deal id, row version, type, and terms with the appropriate message kind.
+     * Repeating the call for the same deal version returns the existing message without
+     * creating a duplicate notification.
+     *
+     * @param actor the signed-in buyer or seller
+     * @param threadId the conversation identifier
+     * @param dealId the proposal identifier
+     * @return the newly created or previously stored proposal message
+     * @throws IllegalArgumentException if an identifier is invalid, the account is not an
+     *     active buyer or seller, the deal or thread is unavailable, the participants do
+     *     not match, or the sender has no shareable Pending or Countered proposal
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
      */
     public ChatMessage sendProposal(User actor, String threadId, String dealId) throws SQLException {
         identifier(threadId);identifier(dealId);
