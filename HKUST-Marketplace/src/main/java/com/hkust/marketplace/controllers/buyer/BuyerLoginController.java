@@ -52,6 +52,7 @@ public class BuyerLoginController {
 
         SessionManager.login(result.user());
         SceneManager.showBuyerDashboard();
+        SceneManager.showLoginSuccess();
     }
 
     private void showError(String msg) {

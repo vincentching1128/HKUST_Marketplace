@@ -233,6 +233,15 @@
     -fx-padding: 40;
 }
 
+.login-success {
+    -fx-background-color: -success;
+    -fx-background-radius: 8;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-padding: 10 16;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.18), 8, 0, 0, 2);
+}
+
 .welcome-bg {
     -fx-background-color: linear-gradient(to bottom right, #003974, #001f3f);
 }

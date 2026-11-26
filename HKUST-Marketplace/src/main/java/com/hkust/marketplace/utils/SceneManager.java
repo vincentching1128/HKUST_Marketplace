@@ -1,10 +1,14 @@
 package com.hkust.marketplace.utils;
 
+import javafx.animation.PauseTransition;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
+import javafx.scene.control.Label;
+import javafx.scene.layout.Pane;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 
 import java.io.IOException;
 import java.net.URL;
@@ -109,5 +113,22 @@ public class SceneManager {
 
     public static void showAdminDashboard() {
         switchScene("admin/AdminDashboardView.fxml");
+    }
+
+    public static void showLoginSuccess() {
+        Pane dashboard = (Pane) primaryStage.getScene().getRoot();
+        Label message = new Label("Log in successful");
+        message.getStyleClass().add("login-success");
+        message.setManaged(false);
+        message.setMouseTransparent(true);
+        message.layoutXProperty().bind(dashboard.widthProperty().subtract(message.widthProperty()).subtract(20));
+        message.layoutYProperty().bind(dashboard.heightProperty().subtract(message.heightProperty()).subtract(20));
+        dashboard.getChildren().add(message);
+        message.applyCss();
+        message.autosize();
+
+        PauseTransition dismiss = new PauseTransition(Duration.seconds(3));
+        dismiss.setOnFinished(event -> dashboard.getChildren().remove(message));
+        dismiss.play();
     }
 }
