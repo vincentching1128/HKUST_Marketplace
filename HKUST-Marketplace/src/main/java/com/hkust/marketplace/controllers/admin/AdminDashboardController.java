@@ -45,6 +45,14 @@ import java.util.Locale;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * FXML controller for the Admin Portal dashboard and its Task 3 screens.
+ *
+ * <p>Provides the listing-approval queue, all-listing management, buyer/seller account
+ * administration, system-wide deal reporting, seller-rating moderation, the admin
+ * notification board, and admin profile editing. Screens read and write MySQL through the
+ * repository and service layer; confirmation and validation dialogs are handled here.
+ */
 public class AdminDashboardController {
 
     private static final Logger LOGGER = Logger.getLogger(AdminDashboardController.class.getName());

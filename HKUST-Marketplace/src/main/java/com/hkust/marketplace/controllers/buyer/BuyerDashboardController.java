@@ -29,6 +29,13 @@ import java.sql.SQLException;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 
+/**
+ * FXML controller for the Buyer Portal dashboard.
+ *
+ * <p>Coordinates the MySQL-backed browse, deals, chat, history, notification, and profile
+ * screens for the signed-in buyer. Long-running operations are delegated to shared
+ * services and background tasks; navigation is guarded by the active session.
+ */
 public class BuyerDashboardController {
 
     private final UserRepository userRepository = new UserRepository();

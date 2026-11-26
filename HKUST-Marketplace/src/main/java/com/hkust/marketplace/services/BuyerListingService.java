@@ -15,6 +15,12 @@ import java.util.Objects;
 
 /** Buyer reads and reports are separate from seller/admin listing management. */
 public class BuyerListingService {
+    /**
+     * Supported buyer catalogue orderings.
+     *
+     * <p>{@link #NEWEST} orders by posting time; the price orders compare practical sale
+     * prices with missing prices sorted last.
+     */
     public enum SortOrder {
         NEWEST("Newest"), PRICE_ASC("Price: low to high"), PRICE_DESC("Price: high to low");
 

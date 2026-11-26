@@ -18,6 +18,12 @@ import java.util.List;
 import java.util.OptionalDouble;
 import java.util.UUID;
 
+/**
+ * Seller-review lifecycle service backed by the MySQL {@code reviews} and {@code deals} tables.
+ *
+ * <p>Validates completed-deal eligibility, writes reviews, seller replies, moderation flags,
+ * and hidden/unhidden state while notifying affected users in the same transaction.
+ */
 public class ReviewService {
     public static final int MAX_TEXT_LENGTH = 2000;
 

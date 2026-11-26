@@ -12,6 +12,14 @@ import java.util.Properties;
 
 import java.util.logging.Level;
 import java.util.logging.Logger;
+/**
+ * Central MySQL connection factory for the marketplace application.
+ *
+ * <p>Resolves credentials from an explicit {@code marketplace.db.config} properties file or
+ * the {@code MARKETPLACE_DB_USER}/{@code MARKETPLACE_DB_PASSWORD} environment pair, then
+ * opens a JDBC connection to the local {@code hkust_marketplace} database. Callers own and
+ * must close the returned connection.
+ */
 public class DatabaseManager {
 
     private static final String URL =

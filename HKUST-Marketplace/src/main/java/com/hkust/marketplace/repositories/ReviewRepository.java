@@ -12,6 +12,13 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * MySQL persistence and read queries for seller reviews in the {@code reviews} table.
+ *
+ * <p>Supports admin moderation and search, seller-facing review history, replies, flags,
+ * and hiding/unhiding. Review rows are joined to deals and listings for usernames and
+ * listing titles.
+ */
 public class ReviewRepository {
     private static final String SELECT_REVIEWS = """
             SELECT r.id, d.seller_username, d.buyer_username, l.itemName, r.rating,

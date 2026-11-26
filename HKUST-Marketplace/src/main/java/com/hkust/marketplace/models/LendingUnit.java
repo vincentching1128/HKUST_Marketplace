@@ -1,5 +1,11 @@
 package com.hkust.marketplace.models;
 
+/**
+ * Time units accepted for lending durations.
+ *
+ * <p>Supports {@code SECONDS} in addition to day, week, and month units so short borrowing
+ * periods can be exercised by services and tests.
+ */
 public enum LendingUnit {
     DAYS("Day", "Days"),
     WEEKS("Week", "Weeks"),

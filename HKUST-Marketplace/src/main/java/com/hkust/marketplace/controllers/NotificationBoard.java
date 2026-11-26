@@ -22,6 +22,14 @@ import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
+/**
+ * Asynchronous, recipient-scoped notification inbox used by all three portals.
+ *
+ * <p>Loads notifications through {@link NotificationService} on a background thread,
+ * renders read and unread history, and marks individual or all notifications as read.
+ * Callers deactivate the board when leaving a portal screen so stale background results
+ * and notifications for the previous recipient are ignored.
+ */
 public class NotificationBoard extends ScrollPane {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm");
     private final NotificationService notifications;

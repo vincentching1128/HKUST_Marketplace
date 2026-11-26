@@ -17,6 +17,13 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * MySQL persistence for listings, photos, and review/moderation state.
+ *
+ * <p>Maps joined seller/deal terms, saves and loads listing photos, supports admin review
+ * and content edits, applies optimistic locking through {@code row_version}, and performs
+ * soft removal of listings.
+ */
 public class ListingRepository {
     // Acceptance copies the agreed counter into offeredPrice / borrowStartDate / borrowDueDate.
     static final String LISTINGS_WITH_DEAL = """

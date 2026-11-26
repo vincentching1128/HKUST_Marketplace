@@ -54,7 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Automated JUnit 5 Integration & Functional Test Suite for Task 3: Admin Portal.
+ * Automated JUnit 5 Integration and Functional Test Suite for Task 3: Admin Portal.
  *
  * <p>File Placement:
  * {@code HKUST-Marketplace/src/test/java/com/hkust/marketplace/testcase/AdminPortalTest.java}
@@ -75,7 +75,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   </li>
  * </ol>
  *
- * <p>Database Isolation & Cleanup:
+ * <p>Database Isolation and Cleanup:
  * Every test generates a unique random prefix (e.g. {@code t9f3a2c1b_}) for all users,
  * listings, deals, reviews, chat threads, and notifications it creates, and removes them
  * in {@link #tearDown()} in foreign-key-safe order. Seeded demo accounts
@@ -84,7 +84,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Task 3 Coverage Map:
  * <ul>
  *   <li>Task 3.1 Admin Login -> {@link Task31_AdminLoginTests}</li>
- *   <li>Task 3.2 Listing Review & Approval -> {@link Task32_ListingReviewTests}</li>
+ *   <li>Task 3.2 Listing Review and Approval -> {@link Task32_ListingReviewTests}</li>
  *   <li>Task 3.3 Manage All Users -> {@link Task33_ManageUsersTests}</li>
  *   <li>Task 3.4 Manage Own Profile -> {@link Task34_ManageOwnProfileTests}</li>
  *   <li>Task 3.5 All Deals Record -> {@link Task35_AllDealsRecordTests}</li>
@@ -362,7 +362,7 @@ public class AdminPortalTest {
 
         /**
          * Test Case: TC-REV-01
-         * Content: Pending Review queue loads all required submission metadata & photos in FIFO order.
+         * Content: Pending Review queue loads all required submission metadata and photos in FIFO order.
          * Steps:
          *   1. Seller submits two listings sequentially (first with 1 photo, second with 0 photos).
          *   2. Query listingRepository.findByStatus(ListingStatus.PENDING_REVIEW).
@@ -824,7 +824,7 @@ public class AdminPortalTest {
          *   3. Query dealRepository.searchDeals(...) with keyword and type filters.
          * Expected Result:
          *   - All 3 returned by prefix; each ListingType filter isolates the exact deal;
-         *     COMPLETED has completedAt, RETURNED has borrowStart & returnedAt;
+         *     COMPLETED has completedAt, RETURNED has borrowStart and returnedAt;
          *     buyer and seller keyword searches return exact matches.
          */
         @Test
@@ -1025,7 +1025,7 @@ public class AdminPortalTest {
 
         /**
          * Test Case: TC-LST-01
-         * Content: Admin creates a listing on behalf of an active seller; rejects inactive sellers & buyers.
+         * Content: Admin creates a listing on behalf of an active seller; rejects inactive sellers and buyers.
          * Steps:
          *   1. testAdmin creates a LEND listing on behalf of testSeller1.
          *   2. Verify owner is testSeller1, status is PENDING_REVIEW, and other active admin (testAdmin2)
@@ -1175,7 +1175,7 @@ public class AdminPortalTest {
          *   3. Remove with valid reason -> true; repeat removal -> false.
          * Expected Result:
          *   - DB row kept with listingStatus='REMOVED'; excluded from findAllListing / findByStatus / findByIdAndSeller.
-         *   - testSeller1 & testBuyer1 receive "Listing Removed" with reason; testBuyer2 is not notified.
+         *   - testSeller1 and testBuyer1 receive "Listing Removed" with reason; testBuyer2 is not notified.
          */
         @Test
         @DisplayName("TC-LST-05: Admin soft-removes listing with reason and notifies seller & active-offer buyers")

@@ -30,6 +30,12 @@ import java.util.Objects;
  */
 public class DealRepository {
 
+    /**
+     * Supplies connections for deal persistence and lifecycle transactions.
+     *
+     * <p>Implementations must return a fresh connection; transaction boundaries remain the
+     * caller's responsibility.
+     */
     @FunctionalInterface
     public interface ConnectionProvider {
         Connection getConnection() throws SQLException;

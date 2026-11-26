@@ -13,6 +13,13 @@ import java.sql.SQLException;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
+/**
+ * FXML controller for seller self-registration.
+ *
+ * <p>Collects seller profile, optional bio, and preferred meet-up data, validates field
+ * limits, hashes the password through {@link AuthService}, and stores the account in the
+ * MySQL {@code users} table.
+ */
 public class SellerRegisterController {
 
     private final UserRepository userRepository = new UserRepository();

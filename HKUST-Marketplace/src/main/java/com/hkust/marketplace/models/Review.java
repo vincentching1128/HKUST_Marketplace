@@ -2,6 +2,12 @@ package com.hkust.marketplace.models;
 
 import java.time.LocalDateTime;
 
+/**
+ * MySQL-backed buyer review of a seller, linked through a completed deal.
+ *
+ * <p>Holds the 1-5 rating, comment, optional seller reply, moderation flags, hidden state,
+ * and creation time shown in seller ratings and admin moderation screens.
+ */
 public class Review {
     private String id;
     private String sellerUsername;

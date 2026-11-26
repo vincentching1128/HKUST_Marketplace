@@ -13,6 +13,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 
+/**
+ * MySQL persistence for accounts in the {@code users} table.
+ *
+ * <p>Provides lookups, registration, profile and active-state updates, password-hash
+ * migration, and permanent deletion. Deletion runs in one transaction and updates related
+ * deals, chats, listings, and notifications before removing the account row.
+ */
 public class UserRepository {
 
     /** Re-read and hold an account stable for a caller-owned business transaction. */

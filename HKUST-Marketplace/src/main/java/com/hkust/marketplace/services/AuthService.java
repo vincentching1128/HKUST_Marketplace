@@ -8,12 +8,28 @@ import java.util.Locale;
 import java.util.Objects;
 
 
+/**
+ * Authentication and account-management service backed by the MySQL {@code users} table.
+ *
+ * <p>Handles login with role and active-account checks, Argon2id password hashing plus
+ * legacy-hash upgrade, registration, profile updates, and permanent buyer/seller deletion
+ * through {@link UserRepository}. The stored account is re-checked before sensitive actions.
+ */
 public class AuthService {
+    /**
+     * Classified outcomes returned by {@link AuthService#login(String, String, UserRole)}.
+     */
     public enum LoginStatus {
         SUCCESS, INVALID_INPUT, USER_NOT_FOUND, WRONG_ROLE, ACCOUNT_DEACTIVATED,
         INCORRECT_PASSWORD, ACCOUNT_CHANGED
     }
 
+    /**
+     * Outcome of a login attempt.
+     *
+     * @param status the classified result; only {@link LoginStatus#SUCCESS} carries a user
+     * @param user the authenticated account on success, otherwise {@code null}
+     */
     public record LoginResult(LoginStatus status, User user) { }
 
     private final UserRepository users;

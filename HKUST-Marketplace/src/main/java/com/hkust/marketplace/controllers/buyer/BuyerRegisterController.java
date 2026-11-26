@@ -11,6 +11,13 @@ import javafx.scene.control.*;
 import java.sql.SQLException;
 import java.util.Locale;
 
+/**
+ * FXML controller for buyer self-registration.
+ *
+ * <p>Collects buyer profile and optional residence-hall data, validates field limits,
+ * hashes the password through {@link AuthService}, and persists the new account in the
+ * MySQL {@code users} table while reporting duplicate-username and storage failures.
+ */
 public class BuyerRegisterController {
 
     private final UserRepository userRepository = new UserRepository();

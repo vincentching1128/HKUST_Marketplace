@@ -112,7 +112,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>Or via Maven: {@code .\mvnw.cmd verify -Dtest=AdminFrontendControllerTest}.</li>
  * </ol>
  *
- * <p>How Modal Alerts & Dialogs Are Tested Without Hanging:
+ * <p>How Modal Alerts and Dialogs Are Tested Without Hanging:
  * A lightweight JavaFX {@link Timeline} watcher runs on the FX Application Thread during each test.
  * Because JavaFX {@code showAndWait()} uses a nested event loop, the watcher continues ticking while
  * any {@code Alert}, {@code TextInputDialog}, or custom {@code Dialog} is open, matches queued
@@ -427,7 +427,7 @@ public class AdminFrontendControllerTest {
         /**
          * Test Case: TC-UI-REV-01
          * Content: Verify initialize() and showReview() render pending listing cards with all
-         *          required submission details (title, status badge, seller username & full name,
+         *          required submission details (title, status badge, seller username and full name,
          *          category, listing type, meet-up location, formatted submitted date, and photo thumbnail).
          */
         @Test
@@ -828,7 +828,7 @@ public class AdminFrontendControllerTest {
 
         /**
          * Test Case: TC-UI-USR-01
-         * Content: Manage Users lists Buyers & Sellers (excluding ADMINs), exposes the
+         * Content: Manage Users lists Buyers and Sellers (excluding ADMINs), exposes the
          *          Edit/Deactivate/Delete controls, and toggles Deactivate/Activate in MySQL and UI.
          */
         @Test

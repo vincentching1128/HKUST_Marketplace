@@ -7,5 +7,8 @@ public record ChatMessage(long id, String threadId, UserRole senderRole, String 
                           Kind kind, String body, String proposalId, Long proposalVersion,
                           ListingType proposalType, Double proposalPrice, LocalDateTime borrowStart,
                           LocalDateTime borrowEnd, LocalDateTime createdAt) {
+    /**
+     * Message purposes in a chat thread: free text, proposal, or counter-proposal.
+     */
     public enum Kind { TEXT, PROPOSAL, COUNTER }
 }

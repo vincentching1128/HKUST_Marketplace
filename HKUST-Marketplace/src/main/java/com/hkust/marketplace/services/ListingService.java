@@ -24,6 +24,13 @@ import java.util.stream.Collectors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * Listing lifecycle service for sellers and administrators, backed by MySQL.
+ *
+ * <p>Creates and validates listings and photos, performs seller and admin edits/removals,
+ * enforces ownership and optimistic-lock checks, cancels affected proposals, and writes
+ * related notifications inside caller transactions where required.
+ */
 public class ListingService {
     private static final Logger LOGGER = Logger.getLogger(ListingService.class.getName());
     private static final int NOTIFICATION_REASON_LIMIT = 500;

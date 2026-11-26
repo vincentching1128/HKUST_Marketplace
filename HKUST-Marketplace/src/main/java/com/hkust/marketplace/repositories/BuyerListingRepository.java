@@ -19,6 +19,11 @@ import java.util.UUID;
 
 /** Buyer-only queries; none of these methods edit a listing or its photos. */
 public class BuyerListingRepository {
+    /**
+     * Supplies connections for buyer listing queries and reports.
+     *
+     * <p>Each call must return a usable MySQL connection; the caller owns its lifecycle.
+     */
     @FunctionalInterface
     public interface ConnectionProvider {
         Connection getConnection() throws SQLException;
