@@ -57,6 +57,7 @@ public class SellerLoginController {
         }
         SessionManager.login(result.user());
         SceneManager.showSellerDashboard();
+        SceneManager.showLoginSuccess();
     }
 
     private void showError(String msg) {

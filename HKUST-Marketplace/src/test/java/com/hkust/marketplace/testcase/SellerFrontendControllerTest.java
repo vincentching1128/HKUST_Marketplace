@@ -200,13 +200,18 @@ public class SellerFrontendControllerTest extends SellerTestFixture {
                 field("passwordField").setText("Wrong123");
                 click("Login");
                 assertEquals("Incorrect password.", label("errorLabel").getText());
+                assertNull(root().lookup(".login-success"));
 
                 field("passwordField").setText(PASSWORD);
                 click("Login");
                 assertEquals(seller.getUsername(), SessionManager.getCurrentUser().getUsername());
                 assertNotNull(find(root(), Button.class, b -> b.getText().strip().equals("My Listings")));
+                Label feedback = (Label) root().lookup(".login-success");
+                assertNotNull(feedback);
+                assertEquals("Log in successful", feedback.getText());
                 click("Logout");
                 assertNull(SessionManager.getCurrentUser());
+                assertNull(root().lookup(".login-success"));
             });
         }
 

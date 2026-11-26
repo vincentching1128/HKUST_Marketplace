@@ -409,6 +409,9 @@ public class AdminFrontendControllerTest {
 
                 // Verify AdminDashboardView is now active on primaryStage
                 Parent dashboardRoot = primaryStage.getScene().getRoot();
+                Label feedback = (Label) dashboardRoot.lookup(".login-success");
+                assertNotNull(feedback);
+                assertEquals("Log in successful", feedback.getText());
                 assertTrue(findAll(dashboardRoot, Label.class).stream()
                         .anyMatch(l -> ("Admin: " + testAdmin.getFullName()).equals(l.getText())));
                 assertTrue(findAll(dashboardRoot, Label.class).stream()

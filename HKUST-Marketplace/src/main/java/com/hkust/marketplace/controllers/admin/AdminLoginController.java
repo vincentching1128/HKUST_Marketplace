@@ -58,6 +58,7 @@ public class AdminLoginController {
         }
         SessionManager.login(result.user());
         SceneManager.showAdminDashboard();
+        SceneManager.showLoginSuccess();
     }
 
     private void showError(String msg) {

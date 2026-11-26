@@ -126,6 +126,9 @@ class BuyerAccountFlowTest extends BuyerFxFixture {
             invoke(login, "handleLogin");
             assertTrue(SessionManager.isBuyer());
             assertEquals(username, SessionManager.getCurrentUser().getUsername());
+            Label feedback = (Label) SceneManager.getPrimaryStage().getScene().getRoot().lookup(".login-success");
+            assertNotNull(feedback);
+            assertEquals("Log in successful", feedback.getText());
 
             User session = SessionManager.getCurrentUser();
             session.setFullName("Stale Session Name");
