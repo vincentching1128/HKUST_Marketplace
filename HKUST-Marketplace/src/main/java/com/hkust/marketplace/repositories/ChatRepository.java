@@ -8,7 +8,19 @@ import java.util.*;
 
 /** Chat persistence; all methods use a caller-owned connection and never commit. */
 public class ChatRepository {
-    /** Make agreed/historical deals reachable from Chats even after leaving Incoming Offers. */
+    /**
+     * Make agreed/historical deals reachable from Chats even after leaving Incoming Offers.
+     *
+     * <p>For the given buyer or seller, finds {@code ACCEPTED}/{@code COMPLETED}/
+     * {@code RETURNED} deals with {@code deleted < 2} and both usernames present that have no
+     * matching chat thread, then creates each missing thread. Caller-owned connection; this
+     * method never commits.
+     *
+     * @param conn an open connection with auto-commit disabled; it is not closed
+     * @param username the account whose deals are scanned
+     * @param role {@link UserRole#BUYER} to scan buyer deals, any other value to scan seller deals
+     * @throws SQLException when a query or insert fails, or a stored deal type is unknown
+     */
     public void ensureDealThreads(Connection conn,String username,UserRole role) throws SQLException {
         String owner=role==UserRole.BUYER?"d.buyer_username":"d.seller_username";
         List<Deal> contexts=new ArrayList<>();
@@ -32,6 +44,17 @@ public class ChatRepository {
         for(Deal deal:contexts)findOrCreate(conn,deal);
     }
 
+    /**
+     * Locks and returns a listing for a chat authorization decision.
+     *
+     * <p>Caller-owned connection: this method never commits. The row is read with
+     * {@code FOR UPDATE}; only id, seller, title, type and status are populated.
+     *
+     * @param conn an open connection with auto-commit disabled; it is not closed
+     * @param id the listing ID
+     * @return the locked listing summary, or {@code null} when no such listing exists
+     * @throws SQLException when the query fails
+     */
     public Listing findListingForChat(Connection conn, String id) throws SQLException {
         try (PreparedStatement stmt = conn.prepareStatement("SELECT id,seller_username,itemName,listingType,listingStatus FROM listings WHERE id=? FOR UPDATE")) {
             stmt.setString(1, id);
@@ -44,6 +67,18 @@ public class ChatRepository {
             }
         }
     }
+    /**
+     * Returns the chat threads the user participates in, newest activity first.
+     *
+     * <p>Matches the buyer or seller username and excludes threads with {@code deleted >= 2}.
+     * Ordering uses the highest message ID (0 for an empty thread), then creation time, then
+     * thread ID. Caller-owned connection; this method never commits.
+     *
+     * @param conn an open connection; the caller owns its lifecycle
+     * @param username the buyer or seller username
+     * @return the user's visible threads; never {@code null}
+     * @throws SQLException when the query fails
+     */
     public List<ChatThread> findThreads(Connection conn, String username) throws SQLException {
         List<ChatThread> threads = new ArrayList<>();
         try (PreparedStatement stmt = conn.prepareStatement("""
@@ -58,6 +93,18 @@ public class ChatRepository {
         return threads;
     }
 
+    /**
+     * Returns one chat thread, optionally locking it for a caller-owned transaction.
+     *
+     * <p>Threads with {@code deleted >= 2} are treated as missing; when {@code lock} is true the
+     * row is read with {@code FOR UPDATE}. Caller-owned connection; this method never commits.
+     *
+     * @param conn an open connection with auto-commit disabled; it is not closed
+     * @param id the thread ID
+     * @param lock true to append {@code FOR UPDATE}
+     * @return the thread, or {@code null} when it does not exist or is double-deleted
+     * @throws SQLException when the query fails
+     */
     public ChatThread findThread(Connection conn, String id, boolean lock) throws SQLException {
         try (PreparedStatement stmt = conn.prepareStatement(
                 "SELECT * FROM chat_threads WHERE id = ? AND deleted < 2" + (lock ? " FOR UPDATE" : ""))) {
@@ -66,6 +113,18 @@ public class ChatRepository {
         }
     }
 
+    /**
+     * Returns the thread for a listing/buyer/seller triple, inserting it when missing.
+     *
+     * <p>The insert relies on the unique key with {@code ON DUPLICATE KEY UPDATE}, so
+     * concurrent callers converge on one thread, which is then re-read with {@code FOR UPDATE}.
+     * Caller-owned connection: this method never commits.
+     *
+     * @param conn an open connection with auto-commit disabled; it is not closed
+     * @param deal the deal whose listing, participants, title and type identify the thread
+     * @return the existing or newly inserted thread, locked for the caller
+     * @throws SQLException when the insert fails or the thread cannot be re-read
+     */
     public ChatThread findOrCreate(Connection conn, Deal deal) throws SQLException {
         try (PreparedStatement stmt = conn.prepareStatement("""
                 INSERT INTO chat_threads(id,listing_id,listing_title,listing_type,buyer_username,seller_username,buyer_name,seller_name)
@@ -88,6 +147,18 @@ public class ChatRepository {
         }
     }
 
+    /**
+     * Returns a thread's messages in ascending ID order.
+     *
+     * <p>When {@code search} is non-blank, only messages whose body contains it ({@code LOCATE})
+     * are returned. Caller-owned connection; this method never commits.
+     *
+     * @param conn an open connection; the caller owns its lifecycle
+     * @param threadId the thread whose messages are returned
+     * @param search substring to filter by, or {@code null}/blank for every message
+     * @return the messages, oldest first; never {@code null}
+     * @throws SQLException when the query fails
+     */
     public List<ChatMessage> findMessages(Connection conn, String threadId, String search) throws SQLException {
         List<ChatMessage> messages = new ArrayList<>();
         boolean filter = search != null && !search.isBlank();
@@ -99,6 +170,17 @@ public class ChatRepository {
         return messages;
     }
 
+    /**
+     * Returns the transcript message that recorded a specific proposal version.
+     *
+     * <p>Caller-owned connection; this method never commits.
+     *
+     * @param conn an open connection; the caller owns its lifecycle
+     * @param dealId the proposal/deal ID stored on the message
+     * @param version the proposal version stored on the message
+     * @return the message, or {@code null} when no message matches
+     * @throws SQLException when the query fails
+     */
     public ChatMessage findProposalMessage(Connection conn, String dealId, long version) throws SQLException {
         try (PreparedStatement stmt = conn.prepareStatement("SELECT * FROM chat_messages WHERE proposal_id=? AND proposal_version=?")) {
             stmt.setString(1, dealId); stmt.setLong(2, version);
@@ -106,6 +188,17 @@ public class ChatRepository {
         }
     }
 
+    /**
+     * Inserts one chat message and returns the stored row.
+     *
+     * <p>The generated message ID is read back and the row is re-selected so database defaults
+     * are reflected. Caller-owned connection; this method never commits.
+     *
+     * @param conn an open connection; the caller owns its lifecycle
+     * @param value the message to store; its fields are written as supplied
+     * @return the stored message including its generated ID
+     * @throws SQLException when the insert or re-read fails
+     */
     public ChatMessage insert(Connection conn, ChatMessage value) throws SQLException {
         String sql = """
                 INSERT INTO chat_messages(thread_id,sender_role,sender_name,message_type,body,proposal_id,

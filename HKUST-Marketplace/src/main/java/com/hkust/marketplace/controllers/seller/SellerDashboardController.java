@@ -46,6 +46,13 @@ import java.util.List;
 import java.util.ArrayList;
 import com.hkust.marketplace.controllers.RatingDisplay;
 
+/**
+ * FXML controller for the Seller Portal dashboard.
+ *
+ * <p>Coordinates MySQL-backed listing creation and management, incoming proposals,
+ * buyer/seller chat, ratings, statistics, notifications, and seller profile editing for
+ * the signed-in seller.
+ */
 public class SellerDashboardController {
     private final UserRepository userRepository = new UserRepository();
     private final ListingService listingService = new ListingService();

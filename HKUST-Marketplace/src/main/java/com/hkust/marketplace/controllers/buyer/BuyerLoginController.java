@@ -10,6 +10,12 @@ import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import java.sql.SQLException;
 
+/**
+ * FXML controller for the Buyer login screen.
+ *
+ * <p>Validates submitted credentials, authenticates MySQL-backed buyer accounts through
+ * {@link AuthService}, stores the session, and routes successful buyers to the dashboard.
+ */
 public class BuyerLoginController {
 
     private final AuthService authService = new AuthService();

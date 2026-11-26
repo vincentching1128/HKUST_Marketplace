@@ -8,6 +8,13 @@ import java.util.List;
  * Listing details shared by the screens and database repository.
  */
 public class Listing {
+    /**
+     * Snapshot of the terms agreed with the accepted deal for a listing.
+     *
+     * @param price agreed sale price, when the deal is a sale
+     * @param start borrowing start time, when the deal is a loan
+     * @param due borrowing due time, when the deal is a loan
+     */
     public record AgreedTerms(java.math.BigDecimal price, LocalDateTime start, LocalDateTime due) {
         private static final java.time.format.DateTimeFormatter DATE =
                 java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm:ss", java.util.Locale.ENGLISH);

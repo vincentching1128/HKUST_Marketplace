@@ -25,6 +25,20 @@ public class ChatInboxPane extends VBox {
     private boolean active=true;
     private long request;
 
+    /**
+     * Creates an empty private-conversation inbox.
+     *
+     * <p>The inbox is populated by {@link #refresh()}. Threads are read asynchronously through
+     * {@link ChatService#getInbox(com.hkust.marketplace.models.User)}; this pane never modifies
+     * the database and delegates opening a conversation to the supplied callback. Must be
+     * created on the JavaFX Application Thread.
+     *
+     * @param service chat service used to load the inbox; must not be {@code null}
+     * @param user supplier of the currently signed-in user, evaluated on each refresh; must
+     *        not be {@code null}
+     * @param open callback invoked when "Open Chat" is clicked for a thread, typically routing
+     *        the portal to a {@link ChatPane}; must not be {@code null}
+     */
     public ChatInboxPane(ChatService service,Supplier<User> user,Consumer<ChatThread> open) {
         super(12);this.service=Objects.requireNonNull(service);this.user=Objects.requireNonNull(user);this.open=Objects.requireNonNull(open);
         setPadding(new Insets(4));refresh.getStyleClass().addAll("btn-outline", "btn-sm");refresh.setOnAction(e->refresh());
@@ -35,8 +49,21 @@ public class ChatInboxPane extends VBox {
         getChildren().addAll(topBar,scroll);
     }
 
+    /**
+     * Deactivates the inbox and invalidates any in-flight load.
+     *
+     * <p>Call when navigating away so results for the previous screen are ignored. The inbox
+     * cannot be reactivated.
+     */
     public void deactivate(){active=false;request++;}
 
+    /**
+     * Loads the current user's conversations asynchronously and renders them.
+     *
+     * <p>No-op after {@link #deactivate()}. The refresh button is disabled while a load runs,
+     * and failures are shown in place of the list. Read-only: threads are fetched through
+     * {@link ChatService}.
+     */
     public void refresh(){
         if(!active)return;User actor=user.get();long token=++request;refresh.setDisable(true);
         rows.getChildren().setAll(new Label("Loading conversations..."));

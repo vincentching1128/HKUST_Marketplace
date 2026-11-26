@@ -11,6 +11,12 @@ import javafx.scene.control.TextField;
 
 import java.sql.SQLException;
 
+/**
+ * FXML controller for the Seller login screen.
+ *
+ * <p>Authenticates active seller accounts from MySQL through {@link AuthService} and opens
+ * the seller dashboard, displaying role, credential, and account-state failures inline.
+ */
 public class SellerLoginController {
 
     private final AuthService authService = new AuthService();

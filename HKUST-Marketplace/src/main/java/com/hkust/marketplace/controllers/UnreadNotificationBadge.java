@@ -20,6 +20,19 @@ public final class UnreadNotificationBadge {
     private final Timeline polling;
     private Task<Integer> pending;
 
+    /**
+     * Creates a badge that keeps the given button's unread count up to date.
+     *
+     * <p>The constructor captures the session's current user, installs a ten-second polling
+     * timeline, and starts or stops automatically as the button is attached to or detached from
+     * a scene. Counts are loaded asynchronously through {@link NotificationService} on daemon
+     * threads; this class only reads notifications and never marks them as read. Must be
+     * created on the JavaFX Application Thread.
+     *
+     * @param button button that receives the unread-count graphic; must not be {@code null}
+     * @param notifications service used to count unread notifications; must not be
+     *        {@code null}
+     */
     public UnreadNotificationBadge(Button button, NotificationService notifications) {
         this.button = button;
         this.notifications = notifications;
@@ -44,6 +57,14 @@ public final class UnreadNotificationBadge {
         polling.playFromStart();
     }
 
+    /**
+     * Reloads the unread count on a background thread.
+     *
+     * <p>Any in-flight request is cancelled and its result discarded. The method is also called
+     * automatically every ten seconds. When the session's current user differs from the
+     * recipient captured at construction, or the button is not attached to a scene, it stops
+     * polling instead of loading.
+     */
     public void refresh() {
         if (recipient == null || SessionManager.getCurrentUser() != recipient || button.getScene() == null) {
             stop();
@@ -73,6 +94,13 @@ public final class UnreadNotificationBadge {
         worker.start();
     }
 
+    /**
+     * Stops polling, cancels the pending count request, and clears the badge graphic and
+     * accessible text from the button.
+     *
+     * <p>Call when leaving the dashboard screen; the badge does not restart automatically after
+     * this call.
+     */
     public void stop() {
         polling.stop();
         if (pending != null) {

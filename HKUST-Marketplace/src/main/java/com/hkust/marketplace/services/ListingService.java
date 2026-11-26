@@ -24,6 +24,13 @@ import java.util.stream.Collectors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * Listing lifecycle service for sellers and administrators, backed by MySQL.
+ *
+ * <p>Creates and validates listings and photos, performs seller and admin edits/removals,
+ * enforces ownership and optimistic-lock checks, cancels affected proposals, and writes
+ * related notifications inside caller transactions where required.
+ */
 public class ListingService {
     private static final Logger LOGGER = Logger.getLogger(ListingService.class.getName());
     private static final int NOTIFICATION_REASON_LIMIT = 500;
@@ -34,20 +41,49 @@ public class ListingService {
     private final DealRepository deals;
     private final DealRepository.ConnectionProvider connections;
 
+    /** Creates a service backed by the default repositories and database connections. */
     public ListingService() {
         this(new UserRepository(), new ListingRepository(), new NotificationRepository());
     }
 
-    /** Kept for existing callers; notifications use the default repository. */
+    /**
+     * Creates a service that writes notifications through a new default
+     * {@link NotificationRepository}.
+     *
+     * <p>Kept for existing callers.
+     *
+     * @param userRepository the account repository used for active-role checks
+     * @param listingRepository the listing repository
+     * @throws NullPointerException if any argument is {@code null}
+     */
     public ListingService(UserRepository userRepository, ListingRepository listingRepository) {
         this(userRepository, listingRepository, new NotificationRepository());
     }
 
+    /**
+     * Creates a service with explicit account, listing, and notification repositories.
+     *
+     * @param userRepository the account repository used for role and ownership checks
+     * @param listingRepository the listing repository
+     * @param notificationRepository the repository used for listing notifications
+     * @throws NullPointerException if any argument is {@code null}
+     */
     public ListingService(UserRepository userRepository, ListingRepository listingRepository,
                           NotificationRepository notificationRepository) {
         this(userRepository, listingRepository, notificationRepository, new DealRepository(), DatabaseManager::getConnection);
     }
 
+    /**
+     * Creates a service with fully supplied collaborators; useful for tests.
+     *
+     * @param userRepository the account repository used for active-role checks
+     * @param listingRepository the listing repository
+     * @param notificationRepository the notification repository
+     * @param deals the deal repository whose caller-owned transactions are used
+     * @param connections supplies the JDBC connections whose commit and rollback this
+     *     service owns
+     * @throws NullPointerException if any argument is {@code null}
+     */
     public ListingService(UserRepository userRepository, ListingRepository listingRepository,
                           NotificationRepository notificationRepository, DealRepository deals,
                           DealRepository.ConnectionProvider connections) {
@@ -59,11 +95,33 @@ public class ListingService {
     }
 
     //use the signed-in account, rather than accepting a seller name from the screen
+    /**
+     * Returns every non-removed listing owned by the signed-in seller, in any status.
+     *
+     * <p>The caller's account is re-read from the database and must be an active seller;
+     * the seller name is taken from that account rather than from the UI.
+     *
+     * @param user the signed-in account
+     * @return the seller's listings
+     * @throws IllegalArgumentException if the stored account is missing, inactive, or not
+     *     a seller
+     * @throws SQLException if the account or listing query fails
+     */
     public List<Listing> getMyListings(User user) throws SQLException {
         User current = requireActiveSeller(user);
         return listingRepository.findBySeller(current.getUsername());
     }
 
+    /**
+     * Returns the aggregate dashboard statistics for the signed-in seller.
+     *
+     * @param seller the signed-in seller account; its stored role and active flag are
+     *     re-checked before the query
+     * @return the seller's views, offers, completed deals, and average rating
+     * @throws IllegalArgumentException if the stored account is missing, inactive, or not
+     *     a seller
+     * @throws SQLException if the account or statistics query fails
+     */
     public SellerStatsRepository.Stats getSellerStats(User seller) throws SQLException {
         User current = requireActiveSeller(seller);
         return new SellerStatsRepository().findBySeller(current.getUsername());
@@ -101,6 +159,20 @@ public class ListingService {
         return current;
     }
 
+    /**
+     * Creates a new seller listing that starts in Pending Review.
+     *
+     * <p>The listing is validated first, then the signed-in account is re-read and must be
+     * an active seller. The service assigns the id, seller name, posted time, zero views,
+     * and a cleared review result. The listing is inserted before every active admin
+     * except the acting user is notified with "New Listing Submitted".
+     *
+     * @param user the signed-in seller
+     * @param listing the listing values; required fields are validated and normalised
+     * @throws IllegalArgumentException if the listing is invalid or the stored account is
+     *     missing, inactive, or not a seller
+     * @throws SQLException if the listing insert or the subsequent admin notifications fail
+     */
     public void createListing(User user, Listing listing) throws SQLException {
         validateListing(listing);
 
@@ -119,7 +191,21 @@ public class ListingService {
                 "New Listing Submitted");
     }
 
-    /** Admin action: create a listing on behalf of an active seller; it starts Pending Review. */
+    /**
+     * Creates a listing on behalf of an active seller as an administrator.
+     *
+     * <p>The admin account must be active in the database, the listing must pass the
+     * normal validation, and the target seller must be an active seller. The listing is
+     * owned by the seller and starts in Pending Review; all active admins except the
+     * acting admin are then notified.
+     *
+     * @param admin the acting administrator; its stored role and active flag are checked
+     * @param sellerUsername the username of the seller who will own the listing
+     * @param listing the listing values to create
+     * @throws IllegalArgumentException if the admin is not an active admin, the listing is
+     *     invalid, or the seller is missing or not an active seller
+     * @throws SQLException if the listing insert or the subsequent admin notifications fail
+     */
     public void createListingAsAdmin(User admin, String sellerUsername, Listing listing) throws SQLException {
         User currentAdmin = requireActiveAdmin(admin);
         validateListing(listing);
@@ -142,7 +228,27 @@ public class ListingService {
                 "Listing Created by Admin");
     }
 
-    /** Admin action: edit any listing's content; it returns to Pending Review for re-approval. */
+    /**
+     * Edits any listing's content as an administrator and returns it to Pending Review.
+     *
+     * <p>The acting admin must be active. Inside one transaction the owned listing is
+     * locked and re-checked against the supplied seller, and all open proposals are
+     * loaded. An accepted deal blocks the edit; every non-accepted open proposal is
+     * cancelled with an optimistic-version check and its buyer is notified. The content is
+     * then updated, the listing status becomes Pending Review with its previous review
+     * result cleared, and the seller is notified using the pre-edit title. Any failure
+     * rolls the whole transaction back.
+     *
+     * @param admin the acting administrator
+     * @param sellerUsername the seller who must own the listing
+     * @param id the listing identifier
+     * @param changes the replacement content and photo set
+     * @throws IllegalArgumentException if the admin is not active, an identifier is
+     *     missing, the listing is missing or owned by another seller, an accepted deal
+     *     exists, or a proposal changed concurrently
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public void updateListingAsAdmin(User admin, String sellerUsername, String id, Listing changes) throws SQLException {
         requireActiveAdmin(admin);
         if (id == null || id.isBlank()) throw new IllegalArgumentException("A listing ID is required.");
@@ -187,7 +293,26 @@ public class ListingService {
         }
     }
 
-    /** Admin removal entry point; returns whether an existing listing was marked Removed. */
+    /**
+     * Soft-removes a listing as an administrator and notifies the affected users.
+     *
+     * <p>The stored account must have the admin role; the active flag is not re-checked on
+     * this path. A non-blank reason is mandatory and is stored on the listing. After the
+     * status becomes Removed, the seller and each distinct buyer with an open proposal are
+     * notified best-effort: notification failures are logged and do not fail the removal.
+     *
+     * @param admin the acting administrator
+     * @param listingId the listing to remove
+     * @param sellerUsername the seller who must own the listing
+     * @param reason the removal reason shown to the users; it may be shortened for the
+     *     notification
+     * @return {@code true} when an existing, not-yet-removed listing was marked Removed;
+     *     {@code false} when no matching listing exists or it was already removed
+     * @throws IllegalArgumentException if the account is not an admin, the reason is
+     *     blank, or an identifier is missing
+     * @throws SQLException if the listing lookup, the removal, or the pre-removal deal
+     *     query fails
+     */
     public boolean removeListingAsAdmin(User admin, String listingId, String sellerUsername,
                                        String reason) throws SQLException {
         requireAdmin(admin);
@@ -263,6 +388,16 @@ public class ListingService {
     }
 
     //load an owned listing in any status; edit/delete apply their extra checks separately
+    /**
+     * Returns one listing owned by the signed-in seller in any non-removed status.
+     *
+     * @param user the signed-in seller
+     * @param id the listing identifier
+     * @return the owned listing
+     * @throws IllegalArgumentException if the stored account is not an active seller, or
+     *     the listing does not exist, is removed, or is not owned by that seller
+     * @throws SQLException if the account or listing query fails
+     */
     public Listing getListing(User user, String id) throws SQLException {
         User current = requireActiveSeller(user);
         Listing listing = listingRepository.findByIdAndSeller(id, current.getUsername());
@@ -270,23 +405,74 @@ public class ListingService {
         return listing;
     }
 
+    /**
+     * Edits an owned listing after confirming that affected proposals may be cancelled.
+     *
+     * <p>If the listing currently has open proposals, this overload throws so the caller
+     * can show the confirmation preview first and call the four-argument overload with the
+     * confirmed versions.
+     *
+     * @param user the signed-in seller
+     * @param id the listing identifier
+     * @param changes the replacement content and photo set
+     * @throws IllegalArgumentException if the listing cannot be changed, has affected
+     *     proposals that require confirmation, has an accepted deal, or the new content is
+     *     invalid
+     * @throws SQLException if a database read or write fails
+     */
     public void updateListing(User user, String id, Listing changes) throws SQLException {
         ListingChangePreview preview = previewListingChange(user, id);
         if (!preview.affectedVersions().isEmpty()) throw confirmationRequired();
         updateListing(user, id, changes, preview);
     }
 
+    /**
+     * Soft-removes an owned listing after confirming that affected proposals may be
+     * cancelled.
+     *
+     * <p>If the listing currently has open proposals, this overload throws so the caller
+     * can show the confirmation preview first and call the three-argument overload with
+     * the confirmed versions.
+     *
+     * @param user the signed-in seller
+     * @param id the listing identifier
+     * @throws IllegalArgumentException if the listing cannot be changed, has affected
+     *     proposals that require confirmation, or has an accepted deal
+     * @throws SQLException if a database read or write fails
+     */
     public void deleteListing(User user, String id) throws SQLException {
         ListingChangePreview preview = previewListingChange(user, id);
         if (!preview.affectedVersions().isEmpty()) throw confirmationRequired();
         deleteListing(user, id, preview);
     }
 
-    /** Exact listing/proposal versions shown in the seller's confirmation dialog. */
+    /**
+     * Exact listing/proposal versions shown in the seller's confirmation dialog and
+     * required again when the change is saved.
+     *
+     * @param listingId the listing identifier the preview belongs to
+     * @param listingVersion the listing's row version at preview time
+     * @param affectedVersions proposal identifiers mapped to the row version each proposal
+     *     had at preview time; stored as an unmodifiable copy
+     */
     public record ListingChangePreview(String listingId, long listingVersion, Map<String, Long> affectedVersions) {
         public ListingChangePreview { affectedVersions = Map.copyOf(affectedVersions); }
     }
 
+    /**
+     * Previews the exact listing and proposal versions a change would cancel.
+     *
+     * <p>The listing is loaded through {@link #getListing(User, String)}, which checks the
+     * active seller and ownership, and then the status rules and accepted-deal rule are
+     * verified.
+     *
+     * @param user the signed-in seller
+     * @param id the listing identifier
+     * @return the versions to echo back when confirming the change
+     * @throws IllegalArgumentException if the account or ownership check fails, the
+     *     listing status cannot be changed, or an accepted deal exists
+     * @throws SQLException if a database query fails
+     */
     public ListingChangePreview previewListingChange(User user, String id) throws SQLException {
         Listing listing = getListing(user, id);
         checkCanChange(listing);
@@ -295,11 +481,47 @@ public class ListingService {
         return new ListingChangePreview(id, listing.getRowVersion(), proposalVersions(affected));
     }
 
+    /**
+     * Applies an edit using the versions returned by
+     * {@link #previewListingChange(User, String)}.
+     *
+     * <p>Inside one transaction the listing is locked and the active-seller check is
+     * repeated. The supplied versions must still match, otherwise the change is rejected.
+     * Open proposals are cancelled and their buyers notified, the listing is updated and
+     * returned to Pending Review, and every active admin is notified that it was
+     * resubmitted. All writes commit together or roll back together.
+     *
+     * @param user the signed-in seller
+     * @param id the listing identifier
+     * @param changes the replacement content and photo set
+     * @param confirmed the preview whose versions must still match
+     * @throws IllegalArgumentException if the confirmation is missing or stale, the seller
+     *     is no longer active or the owner, the status changed, an accepted deal exists,
+     *     or the content is invalid
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public void updateListing(User user, String id, Listing changes, ListingChangePreview confirmed) throws SQLException {
         validateListing(changes);
         changeListing(user, id, changes, confirmed);
     }
 
+    /**
+     * Soft-removes an owned listing using the versions returned by
+     * {@link #previewListingChange(User, String)}.
+     *
+     * <p>Inside one transaction the listing is locked and the active-seller check is
+     * repeated, stale versions are rejected, open proposals are cancelled and their buyers
+     * notified, and the listing is marked Removed while its deal history is preserved.
+     *
+     * @param user the signed-in seller
+     * @param id the listing identifier
+     * @param confirmed the preview whose versions must still match
+     * @throws IllegalArgumentException if the confirmation is missing or stale, the seller
+     *     is no longer active or the owner, the status changed, or an accepted deal exists
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public void deleteListing(User user, String id, ListingChangePreview confirmed) throws SQLException {
         changeListing(user, id, null, confirmed);
     }
@@ -394,6 +616,17 @@ public class ListingService {
     //check before opening the edit form and again before saving or deleting
     //this checks change restrictions only; getListing performs account and ownership checks
     //Pending proposal cancellation is rechecked in the confirmed change transaction.
+    /**
+     * Checks whether a listing's current status permits an edit or deletion.
+     *
+     * <p>Only Pending Review, Live, and Rejected listings may be changed. This method
+     * checks change restrictions only; the caller must still verify the account and
+     * ownership.
+     *
+     * @param listing the listing to check
+     * @throws IllegalArgumentException if the status is not Pending Review, Live, or
+     *     Rejected
+     */
     public void checkCanChange(Listing listing) {
         if (!Set.of(ListingStatus.PENDING_REVIEW, ListingStatus.LIVE, ListingStatus.REJECTED)
                 .contains(listing.getStatus())) {

@@ -3,8 +3,11 @@ package com.hkust.marketplace.models;
 import java.time.LocalDateTime;
 
 /**
- * Simple in-memory user model (no persistence).
- * TODO: Replace with real entity + repository when backend is added.
+ * Persisted user account mapped from the MySQL {@code users} table.
+ *
+ * <p>Contains authentication, role, and active-state fields plus optional buyer residence
+ * and seller bio/preferred meet-up data. Services hash passwords before storage, and
+ * repositories map this object to and from database rows.
  */
 public class User {
     private String username;

@@ -2,6 +2,12 @@ package com.hkust.marketplace.models;
 
 import java.time.LocalDateTime;
 
+/**
+ * MySQL-backed deal/proposal record shared by buyer, seller, and admin views.
+ *
+ * <p>Stores the proposal and agreed terms (sale price or borrowing period), lifecycle
+ * status, timestamps, and the optimistic-lock version for a deal between a buyer and seller.
+ */
 public class Deal {
     private String id;
     private String listingId;

@@ -2,6 +2,12 @@ package com.hkust.marketplace.models;
 
 import java.time.LocalDateTime;
 
+/**
+ * MySQL-backed notification sent to one user.
+ *
+ * <p>Captures the recipient, title, message, category, creation timestamp, and read state
+ * displayed by the admin, buyer, and seller notification boards.
+ */
 public class Notification {
     private String id;
     private String username; // recipient

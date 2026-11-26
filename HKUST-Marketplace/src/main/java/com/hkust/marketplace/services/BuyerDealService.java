@@ -30,11 +30,24 @@ public class BuyerDealService {
     private final DealRepository.ConnectionProvider connections;
     private final Clock clock;
 
+    /** Creates a service backed by the default repositories, database connections, and system clock. */
     public BuyerDealService() {
         this(new DealRepository(), new UserRepository(), new NotificationRepository(),
                 DatabaseManager::getConnection, Clock.systemDefaultZone());
     }
 
+    /**
+     * Creates a service with explicit collaborators; useful for tests.
+     *
+     * @param deals the deal repository
+     * @param users the account repository used for active-buyer and ownership checks
+     * @param notifications the notification repository
+     * @param connections supplies the JDBC connections whose commit and rollback this
+     *     service owns
+     * @param clock the clock used for proposal and borrowing timestamps, so tests can
+     *     control time
+     * @throws NullPointerException if any argument is {@code null}
+     */
     public BuyerDealService(DealRepository deals, UserRepository users, NotificationRepository notifications,
                             DealRepository.ConnectionProvider connections, Clock clock) {
         this.deals = Objects.requireNonNull(deals);
@@ -44,15 +57,46 @@ public class BuyerDealService {
         this.clock = Objects.requireNonNull(clock);
     }
 
+    /**
+     * Returns the signed-in buyer's completed and returned deal history, newest first.
+     *
+     * <p>Each entry includes the listing, seller, agreed terms, and any review the buyer
+     * wrote.
+     *
+     * @param buyer the signed-in buyer
+     * @return the buyer's closed deals with review data
+     * @throws IllegalArgumentException if the stored account is missing, inactive, or not
+     *     a buyer
+     * @throws SQLException if the account or history query fails
+     */
     public List<DealHistoryEntry> getHistory(User buyer) throws SQLException {
         return deals.findBuyerHistory(requireBuyer(null, buyer).getUsername());
     }
 
+    /**
+     * Returns every deal belonging to the signed-in buyer, in any status.
+     *
+     * @param buyer the signed-in buyer
+     * @return the buyer's deals
+     * @throws IllegalArgumentException if the stored account is missing, inactive, or not
+     *     a buyer
+     * @throws SQLException if the account or deal query fails
+     */
     public List<Deal> getMyDeals(User buyer) throws SQLException {
         User current = requireBuyer(null, buyer);
         return deals.findByBuyer(current.getUsername());
     }
 
+    /**
+     * Returns one deal that belongs to the signed-in buyer, in any status.
+     *
+     * @param buyer the signed-in buyer
+     * @param id the deal identifier
+     * @return the owned deal
+     * @throws IllegalArgumentException if the account is not an active buyer, or the deal
+     *     does not exist or belongs to another buyer
+     * @throws SQLException if the account or deal query fails
+     */
     public Deal getMyDeal(User buyer, String id) throws SQLException {
         User current = requireBuyer(null, buyer);
         Deal deal = deals.findById(id).orElseThrow(BuyerDealService::unavailable);
@@ -60,7 +104,30 @@ public class BuyerDealService {
         return deal;
     }
 
-    /** A giveaway claim is a pending request; only seller acceptance reserves the item. */
+    /**
+     * Submits a buyer proposal or giveaway claim; it starts as Pending.
+     *
+     * <p>A giveaway claim is a pending request; only seller acceptance reserves the item.
+     * A lending proposal additionally requires a start that is not before the current time
+     * and an end at least five seconds after it. Inside one transaction the buyer is
+     * re-read and must be active, a duplicate active proposal by the same buyer for the
+     * listing is rejected, and the repository re-checks that the listing is live, matches
+     * the type, still has its seller, and has no competing accepted deal. On success the
+     * seller receives a "New Buyer Proposal" notification in the same transaction.
+     *
+     * @param buyer the signed-in buyer
+     * @param listingId the listing being proposed for
+     * @param type the listing type; must not be {@code null}
+     * @param price the sale offer price, or {@code null} for borrow requests and claims
+     * @param start the requested borrowing start, or {@code null} for non-borrow proposals
+     * @param end the requested borrowing end, or {@code null} for non-borrow proposals
+     * @return the persisted proposal
+     * @throws IllegalArgumentException if the type or listing id is missing, a borrowing
+     *     period is invalid, the account is not an active buyer, a duplicate proposal
+     *     exists, or the repository rejects the proposal
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public Deal submit(User buyer, String listingId, ListingType type, Double price,
                        LocalDateTime start, LocalDateTime end) throws SQLException {
         if (type == null) throw new IllegalArgumentException("A listing type is required.");
@@ -95,6 +162,24 @@ public class BuyerDealService {
         return proposal;
     }
 
+    /**
+     * Accepts a seller counteroffer as the buyer.
+     *
+     * <p>The deal must still be Countered at the supplied version and, for a borrowing
+     * counter, its period must not have expired. The deal becomes Accepted, the listing
+     * moves from Live to Reserved, competing open proposals are cancelled and their
+     * buyers notified, and the seller receives a "Counteroffer Accepted" notification.
+     * All changes commit together.
+     *
+     * @param buyer the signed-in buyer who owns the proposal
+     * @param id the deal identifier
+     * @param version the row version shown to the buyer
+     * @throws IllegalArgumentException if the version is invalid or stale, the buyer is
+     *     not active or not the owner, the status is no longer Countered, the counter
+     *     period expired, or the listing changed
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public void acceptCounter(User buyer, String id, long version) throws SQLException {
         change(buyer, id, version, (connection, deal, now) -> {
             if (deal.getStatus() != DealStatus.COUNTERED) throw new IllegalArgumentException("This counteroffer is no longer open.");
@@ -109,6 +194,17 @@ public class BuyerDealService {
         });
     }
 
+    /**
+     * Declines a seller counteroffer as the buyer and notifies the seller.
+     *
+     * @param buyer the signed-in buyer who owns the proposal
+     * @param id the deal identifier
+     * @param version the row version shown to the buyer
+     * @throws IllegalArgumentException if the version is invalid or stale, the buyer is
+     *     not active or not the owner, or the proposal is no longer Countered
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public void declineCounter(User buyer, String id, long version) throws SQLException {
         change(buyer, id, version, (connection, deal, now) -> {
             if (deal.getStatus() != DealStatus.COUNTERED) throw new IllegalArgumentException("This counteroffer is no longer open.");
@@ -117,6 +213,23 @@ public class BuyerDealService {
         });
     }
 
+    /**
+     * Completes an accepted sale or giveaway claim as the buyer.
+     *
+     * <p>Borrowing deals cannot be completed through this method; use
+     * {@link #returnBorrowed(User, String, long)}. The deal becomes Completed, the
+     * reserved listing becomes Sold for a sale or Given for a giveaway, and the seller is
+     * notified in the same transaction.
+     *
+     * @param buyer the signed-in buyer who owns the deal
+     * @param id the deal identifier
+     * @param version the row version shown to the buyer
+     * @throws IllegalArgumentException if the version is invalid or stale, the buyer is
+     *     not active or not the owner, the deal is not an accepted purchase or claim, or
+     *     the listing changed
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public void complete(User buyer, String id, long version) throws SQLException {
         change(buyer, id, version, (connection, deal, now) -> {
             if (deal.getStatus() != DealStatus.ACCEPTED || deal.getDealType() == ListingType.LEND) {
@@ -128,6 +241,22 @@ public class BuyerDealService {
         });
     }
 
+    /**
+     * Marks an accepted borrowing as returned by the buyer.
+     *
+     * <p>The deal must be an accepted lending deal whose borrowing period has started.
+     * The deal becomes Returned, the reserved listing becomes Live again, and the seller
+     * is notified in the same transaction.
+     *
+     * @param buyer the signed-in buyer who owns the deal
+     * @param id the deal identifier
+     * @param version the row version shown to the buyer
+     * @throws IllegalArgumentException if the version is invalid or stale, the buyer is
+     *     not active or not the owner, the deal is not an accepted borrowing, the
+     *     borrowing has not started yet, or the listing changed
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public void returnBorrowed(User buyer, String id, long version) throws SQLException {
         change(buyer, id, version, (connection, deal, now) -> {
             if (deal.getStatus() != DealStatus.ACCEPTED || deal.getDealType() != ListingType.LEND) {
@@ -139,7 +268,18 @@ public class BuyerDealService {
         });
     }
 
-    /** Safe to run repeatedly; a stale candidate is rechecked under the listing/deal lock. */
+    /**
+     * Returns every due borrowing whose period has ended.
+     *
+     * <p>Safe to run repeatedly: each candidate is re-locked and re-checked in its own
+     * transaction, so a stale candidate is skipped. An accepted lending deal with a due
+     * time at or before the clock is changed to Returned, its listing returns to Live, the
+     * buyer is notified, and the seller is notified.
+     *
+     * @return the number of borrowings returned by this run
+     * @throws SQLException if any database read or write fails; each failed transaction is
+     *     rolled back
+     */
     public int returnDueBorrowings() throws SQLException {
         int returned = 0;
         for (Deal candidate : deals.findDueBorrowings(LocalDateTime.now(clock))) {
@@ -162,6 +302,16 @@ public class BuyerDealService {
         return returned;
     }
 
+    /**
+     * Sends one "Borrowing Due Soon" reminder per borrowing due within the next day.
+     *
+     * <p>Each candidate is re-locked and re-checked. A deterministic notification id is
+     * derived from the deal id and checked for existence, so repeated or concurrent runs do
+     * not duplicate the reminder.
+     *
+     * @throws SQLException if any database read or write fails; each failed transaction is
+     *     rolled back
+     */
     public void remindDueBorrowings() throws SQLException {
         LocalDateTime now = LocalDateTime.now(clock);
         for (Deal candidate : deals.findBorrowingsNearingDueDate(now, now.plus(REMINDER_LEAD))) {

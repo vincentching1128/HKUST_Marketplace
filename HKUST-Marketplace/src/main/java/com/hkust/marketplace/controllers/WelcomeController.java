@@ -3,6 +3,12 @@ package com.hkust.marketplace.controllers;
 import com.hkust.marketplace.utils.SceneManager;
 import javafx.fxml.FXML;
 
+/**
+ * Landing-screen controller for choosing the Buyer, Seller, or Admin portal.
+ *
+ * <p>Each action delegates navigation to {@link SceneManager} after the corresponding
+ * login view is selected; this controller does not change account state.
+ */
 public class WelcomeController {
 
     @FXML

@@ -11,6 +11,12 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * JUnit support base for JavaFX buyer-portal tests that require a running MySQL fixture.
+ *
+ * <p>Starts the shared JavaFX toolkit once and exposes {@link #fx(Callable)} for safely
+ * executing UI actions on the JavaFX Application Thread; extends {@link MySqlFixture}.
+ */
 public abstract class BuyerFxFixture extends MySqlFixture {
     @BeforeAll static void startJavaFx() throws Exception {
         var ready = new CountDownLatch(1);

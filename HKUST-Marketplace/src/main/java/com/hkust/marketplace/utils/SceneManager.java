@@ -18,14 +18,43 @@ public class SceneManager {
     private static Stage primaryStage;
     private static final String FXML_BASE = "/fxml/";
 
+    /**
+     * Initializes the navigation helper with the application's primary stage.
+     *
+     * <p>Must be called on the JavaFX Application Thread before any
+     * {@link #switchScene(String)} or {@code show*} helper. Calling it again replaces the
+     * stored stage, for example after the window is recreated.
+     *
+     * @param stage primary stage used by all subsequent navigation calls
+     */
     public static void init(Stage stage) {
         primaryStage = stage;
     }
 
+    /**
+     * Returns the stage registered by {@link #init(Stage)}.
+     *
+     * @return the primary stage, or {@code null} when {@link #init(Stage)} has not been called
+     */
     public static Stage getPrimaryStage() {
         return primaryStage;
     }
 
+    /**
+     * Loads an FXML view from the classpath and shows it in the primary stage.
+     *
+     * <p>The resource is resolved as {@code /fxml/} plus {@code fxmlName}. On the first call a
+     * new {@link javafx.scene.Scene} of 1200x780 is created and {@code /css/styles.css} is
+     * attached when available; later calls keep that scene and its stylesheets and only replace
+     * its root node. Failures (missing resource, FXML load error) are reported in a modal alert
+     * and rethrown wrapped in a {@link RuntimeException}. Must be called on the JavaFX
+     * Application Thread.
+     *
+     * @param fxmlName FXML file path relative to the {@code /fxml/} resource directory, for
+     *        example {@code buyer/BuyerLoginView.fxml}
+     * @throws RuntimeException if the helper was not initialized, the resource is missing, or the
+     *         view cannot be loaded
+     */
     public static void switchScene(String fxmlName) {
         try {
             if (primaryStage == null) {
@@ -75,38 +104,92 @@ public class SceneManager {
         }
     }
 
+    /**
+     * Shows the shared welcome screen.
+     *
+     * @throws RuntimeException if the view cannot be loaded, as described in
+     *         {@link #switchScene(String)}
+     */
     public static void showWelcome() {
         switchScene("WelcomeView.fxml");
     }
 
+    /**
+     * Shows the buyer login screen.
+     *
+     * @throws RuntimeException if the view cannot be loaded, as described in
+     *         {@link #switchScene(String)}
+     */
     public static void showBuyerLogin() {
         switchScene("buyer/BuyerLoginView.fxml");
     }
 
+    /**
+     * Shows the buyer registration screen.
+     *
+     * @throws RuntimeException if the view cannot be loaded, as described in
+     *         {@link #switchScene(String)}
+     */
     public static void showBuyerRegister() {
         switchScene("buyer/BuyerRegisterView.fxml");
     }
 
+    /**
+     * Shows the buyer dashboard.
+     *
+     * @throws RuntimeException if the view cannot be loaded, as described in
+     *         {@link #switchScene(String)}
+     */
     public static void showBuyerDashboard() {
         switchScene("buyer/BuyerDashboardView.fxml");
     }
 
+    /**
+     * Shows the seller login screen.
+     *
+     * @throws RuntimeException if the view cannot be loaded, as described in
+     *         {@link #switchScene(String)}
+     */
     public static void showSellerLogin() {
         switchScene("seller/SellerLoginView.fxml");
     }
 
+    /**
+     * Shows the seller registration screen.
+     *
+     * @throws RuntimeException if the view cannot be loaded, as described in
+     *         {@link #switchScene(String)}
+     */
     public static void showSellerRegister() {
         switchScene("seller/SellerRegisterView.fxml");
     }
 
+    /**
+     * Shows the seller dashboard.
+     *
+     * @throws RuntimeException if the view cannot be loaded, as described in
+     *         {@link #switchScene(String)}
+     */
     public static void showSellerDashboard() {
         switchScene("seller/SellerDashboardView.fxml");
     }
 
+    /**
+     * Shows the administrator login screen.
+     *
+     * @throws RuntimeException if the view cannot be loaded, as described in
+     *         {@link #switchScene(String)}
+     */
     public static void showAdminLogin() {
         switchScene("admin/AdminLoginView.fxml");
     }
 
+    /**
+     * Shows the administrator dashboard.
+     *
+     * @throws RuntimeException if the view cannot be loaded, as described in
+     *         {@link #switchScene(String)}
+     */
     public static void showAdminDashboard() {
         switchScene("admin/AdminDashboardView.fxml");
     }

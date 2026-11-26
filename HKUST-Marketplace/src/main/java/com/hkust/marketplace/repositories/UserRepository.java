@@ -13,9 +13,28 @@ import java.util.ArrayList;
 import java.util.List;
 
 
+/**
+ * MySQL persistence for accounts in the {@code users} table.
+ *
+ * <p>Provides lookups, registration, profile and active-state updates, password-hash
+ * migration, and permanent deletion. Deletion runs in one transaction and updates related
+ * deals, chats, listings, and notifications before removing the account row.
+ */
 public class UserRepository {
 
-    /** Re-read and hold an account stable for a caller-owned business transaction. */
+    /**
+     * Re-reads an account while holding a shared ({@code FOR SHARE}) lock for a caller-owned
+     * business transaction.
+     *
+     * <p>The caller owns the connection and its commit/rollback; this method never commits,
+     * rolls back, or closes it.
+     *
+     * @param connection an open connection with auto-commit disabled; it is not closed
+     * @param username the account's username
+     * @return the account, or {@code null} when no such username exists
+     * @throws IllegalArgumentException when {@code connection} is null or auto-commit is enabled
+     * @throws SQLException when the query fails
+     */
     public User findByUsername(Connection connection, String username) throws SQLException {
         if (connection == null || connection.getAutoCommit()) {
             throw new IllegalArgumentException("An account lock requires a transaction.");
@@ -29,6 +48,14 @@ public class UserRepository {
         }
     }
 
+    /**
+     * Looks up an account by username without locking, using a new connection that this method
+     * opens and closes.
+     *
+     * @param target the username to look up
+     * @return the account, or {@code null} when no such username exists
+     * @throws SQLException when the query fails
+     */
     public User findByUsername(String target) throws SQLException {
         String sql = "SELECT * FROM users WHERE username = ?"; //query
         try (Connection conn = DatabaseManager.getConnection();
@@ -59,6 +86,15 @@ public class UserRepository {
         return user;
     }
 
+    /**
+     * Checks whether an account exists, using a new connection.
+     *
+     * <p>The comparison follows the database collation for the username column.
+     *
+     * @param target the username to check
+     * @return true when a matching account row exists
+     * @throws SQLException when the query fails
+     */
     public boolean existsByUsername(String target) throws SQLException {
         String sql = "SELECT 1 FROM users WHERE username = ?";
 
@@ -72,6 +108,18 @@ public class UserRepository {
         }
     }
 
+    /**
+     * Inserts a new account, using a connection owned by this method.
+     *
+     * <p>The password hash must already be an Argon2id hash; hashing and credential checks
+     * belong to the caller. A duplicate username aborts before anything is inserted.
+     *
+     * @param user the account to insert; its username, full name, hash, role and profile
+     *        fields are written
+     * @throws IllegalArgumentException when the password hash is not a valid Argon2id hash or
+     *         the username already exists
+     * @throws SQLException when the insert fails
+     */
     public void register(User user) throws SQLException {
         requireHash(user.getPasswordHash());
         if (existsByUsername(user.getUsername())){
@@ -99,11 +147,34 @@ public class UserRepository {
 
     }
 
-    /** Updates profile fields for the supplied username. Returns false if no user matches. */
+    /**
+     * Updates profile fields for the supplied username without changing its password hash.
+     *
+     * <p>Uses a new connection and writes a single statement.
+     *
+     * @param user the account whose profile fields are written
+     * @return true when a user row was updated, false when no such username exists
+     * @throws SQLException when the update fails
+     * @see #updateProfile(User, String)
+     */
     public boolean updateProfile(User user) throws SQLException{
         return updateProfile(user, null);
     }
 
+    /**
+     * Updates the stored profile fields and, when supplied, the password hash.
+     *
+     * <p>The connection is opened and closed by this method. Pass {@code null} for
+     * {@code passwordHash} to leave the stored hash unchanged.
+     *
+     * @param user the account whose profile fields are written
+     * @param passwordHash an already hashed password to store, or {@code null} to keep the
+     *        stored hash
+     * @return true when a user row was updated, false when no such username exists
+     * @throws IllegalArgumentException when {@code passwordHash} is non-null but not a valid
+     *         Argon2id hash
+     * @throws SQLException when the update fails
+     */
     public boolean updateProfile(User user, String passwordHash) throws SQLException {
         if (passwordHash != null) requireHash(passwordHash);
         String sql = """
@@ -128,7 +199,18 @@ public class UserRepository {
         }
     }
 
-    /** Stores an already hashed password. Authentication and authorization belong to the caller. */
+    /**
+     * Stores an already hashed password, using a new connection.
+     *
+     * <p>Authentication and authorization belong to the caller. The stored hash is replaced
+     * unconditionally for a matching username.
+     *
+     * @param username the account whose hash is updated
+     * @param hash the new Argon2id hash
+     * @return true when a user row was updated, false when no such username exists
+     * @throws IllegalArgumentException when {@code hash} is not a valid Argon2id hash
+     * @throws SQLException when the update fails
+     */
     public boolean updatePasswordHash(String username, String hash) throws SQLException{
         requireHash(hash);
         String sql = "UPDATE users SET password_hash = ? WHERE username = ?";
@@ -141,7 +223,21 @@ public class UserRepository {
         }
     }
 
-    /** Compare exact bytes, avoiding case-insensitive database collation during migration. */
+    /**
+     * Replaces the password hash only when the stored value is exactly the supplied previous
+     * hash, comparing bytes instead of relying on the case-insensitive database collation.
+     *
+     * <p>This is a compare-and-set used by the legacy-hash migration. The connection is opened
+     * and closed here; a concurrent change of the stored hash makes the update fail.
+     *
+     * @param username the account whose hash is updated
+     * @param previous the exact hash that must still be stored
+     * @param hash the new Argon2id hash to store
+     * @return true when the stored hash equalled {@code previous} and was replaced, false
+     *         otherwise
+     * @throws IllegalArgumentException when {@code hash} is not a valid Argon2id hash
+     * @throws SQLException when the update fails
+     */
     public boolean replacePasswordHash(String username, String previous, String hash) throws SQLException {
         requireHash(hash);
         String sql = "UPDATE users SET password_hash = ? WHERE username = ? "
@@ -161,6 +257,14 @@ public class UserRepository {
         }
     }
 
+    /**
+     * Sets the account's active flag, using a new connection.
+     *
+     * @param username the account to update
+     * @param active {@code true} to activate the account, {@code false} to deactivate it
+     * @throws IllegalArgumentException when no user has that username
+     * @throws SQLException when the update fails
+     */
     public void setActive(String username, boolean active) throws SQLException{
         if(!existsByUsername(username)){
             throw new IllegalArgumentException("No such username");
@@ -179,6 +283,12 @@ public class UserRepository {
     }
 
 
+    /**
+     * Returns every account ordered by username, using a new connection.
+     *
+     * @return all users in ascending username order; never {@code null}
+     * @throws SQLException when the query fails
+     */
     public List<User> findAll() throws SQLException{
         String sql = "SELECT * FROM users ORDER BY username";
         List<User> users = new ArrayList<>();
@@ -204,9 +314,14 @@ public class UserRepository {
      *   <li>deletes the user row; the deals/chat/listing FKs use ON DELETE SET NULL, so the
      *       preserved records keep the remaining participant.</li>
      * </ol>
-     * Admin accounts cannot be removed here.
+     * Admin accounts cannot be removed here. The account row is locked with {@code FOR UPDATE}
+     * before any related write, so a concurrent deletion cannot double-apply the counters.
+     * The connection and transaction are owned by this method; it commits on success and rolls
+     * back on failure.
      *
+     * @param username the buyer/seller username to delete permanently; it is trimmed first
      * @throws IllegalArgumentException when the username is missing, unknown or an admin
+     * @throws SQLException when any statement fails; the transaction is rolled back
      */
     public void deleteUser(String username) throws SQLException {
         if (username == null || username.isBlank()) {

@@ -12,6 +12,13 @@ import java.sql.SQLException;
 
 
 
+/**
+ * FXML controller for the Admin login screen.
+ *
+ * <p>Authenticates credentials against the MySQL-backed accounts through
+ * {@link AuthService}, enforces the ADMIN role and active-account checks, stores the
+ * session, and opens the admin dashboard on success.
+ */
 public class AdminLoginController {
 
     @FXML private TextField usernameField;

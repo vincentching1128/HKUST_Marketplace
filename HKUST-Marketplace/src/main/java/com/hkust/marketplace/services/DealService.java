@@ -31,16 +31,38 @@ public class DealService {
     private final DealRepository.ConnectionProvider connections;
     private final Clock clock;
 
+    /** Creates a service backed by the default repositories and system clock. */
     public DealService() {
         this(new UserRepository(), new DealRepository(), new ListingRepository(),
                 new NotificationRepository());
     }
 
+    /**
+     * Creates a service that uses the default database connections and system clock.
+     *
+     * @param users the account repository used for active-seller and ownership checks
+     * @param deals the deal repository
+     * @param listings the listing repository
+     * @param notifications the notification repository
+     * @throws NullPointerException if any argument is {@code null}
+     */
     public DealService(UserRepository users, DealRepository deals,
                        ListingRepository listings, NotificationRepository notifications) {
         this(users, deals, listings, notifications, DatabaseManager::getConnection, Clock.systemDefaultZone());
     }
 
+    /**
+     * Creates a service with fully supplied collaborators; useful for tests.
+     *
+     * @param users the account repository
+     * @param deals the deal repository
+     * @param listings the listing repository
+     * @param notifications the notification repository
+     * @param connections supplies the JDBC connections whose commit and rollback this
+     *     service owns
+     * @param clock the clock used for deal action timestamps
+     * @throws NullPointerException if any argument is {@code null}
+     */
     public DealService(UserRepository users, DealRepository deals,
                        ListingRepository listings, NotificationRepository notifications,
                        DealRepository.ConnectionProvider connections, Clock clock) {
@@ -52,7 +74,16 @@ public class DealService {
         this.clock = Objects.requireNonNull(clock);
     }
 
-    /** Load this seller's pending/countered incoming offers, borrow requests, and claims. */
+    /**
+     * Returns the seller's incoming Pending and Countered offers, borrow requests, and
+     * giveaway claims.
+     *
+     * @param seller the signed-in seller; its stored role and active flag are re-checked
+     * @return the open incoming proposals
+     * @throws IllegalArgumentException if the stored account is missing, inactive, or not
+     *     a seller
+     * @throws SQLException if the account or deal query fails
+     */
     public List<Deal> getIncomingOffers(User seller) throws SQLException {
         User current = requireActiveSeller(null, seller);
         return deals.findBySeller(current.getUsername()).stream()
@@ -61,7 +92,16 @@ public class DealService {
                 .toList();
     }
 
-    /** Load an owned deal in any status for its detail view and future linked chat. */
+    /**
+     * Returns one owned deal in any status for the seller's detail view.
+     *
+     * @param seller the signed-in seller
+     * @param dealId the deal identifier
+     * @return the owned deal
+     * @throws IllegalArgumentException if the account is not an active seller, or the deal
+     *     does not exist or belongs to another seller
+     * @throws SQLException if the account or deal query fails
+     */
     public Deal getSellerDeal(User seller, String dealId) throws SQLException {
         User current = requireActiveSeller(null, seller);
         Deal deal = deals.findById(dealId).orElseThrow(DealService::unavailableDeal);
@@ -69,7 +109,25 @@ public class DealService {
         return deal;
     }
 
-    /** Accept a PENDING proposal; accepting a seller's counter is the buyer's action. */
+    /**
+     * Accepts a Pending proposal as the seller; accepting a seller's counter is the
+     * buyer's action.
+     *
+     * <p>The deal is locked and must belong to the active seller at the expected version.
+     * A borrowing request whose period has expired cannot be accepted. The deal becomes
+     * Accepted, the Live listing is reserved, competing open proposals are cancelled with
+     * their buyers notified, and the buyer receives an "Offer Accepted" notification. All
+     * writes commit together or roll back together.
+     *
+     * @param seller the signed-in seller
+     * @param dealId the deal identifier
+     * @param expectedVersion the row version shown to the seller
+     * @throws IllegalArgumentException if the seller identity or version is invalid, the
+     *     deal is not Pending or has changed, a borrowing period expired, the listing is
+     *     no longer available, or another deal was already accepted
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public void acceptOffer(User seller, String dealId, long expectedVersion) throws SQLException {
         validateAction(seller, expectedVersion);
         inTransaction(connection -> {
@@ -104,7 +162,21 @@ public class DealService {
         });
     }
 
-    /** Decline an open owned proposal using the version displayed to the seller. */
+    /**
+     * Declines a Pending or Countered proposal as the seller.
+     *
+     * <p>The deal is locked at the expected version, changed to Declined, and the buyer is
+     * notified in the same transaction.
+     *
+     * @param seller the signed-in seller who owns the deal
+     * @param dealId the deal identifier
+     * @param expectedVersion the row version shown to the seller
+     * @throws IllegalArgumentException if the seller identity or version is invalid, the
+     *     deal is missing or not owned, the proposal is not Pending or Countered, or it
+     *     changed concurrently
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
+     */
     public void declineOffer(User seller, String dealId, long expectedVersion) throws SQLException {
         validateAction(seller, expectedVersion);
         inTransaction(connection -> {
@@ -118,8 +190,24 @@ public class DealService {
     }
 
     /**
-     * Counter a sale with a price, or a borrowing request with start/end times.
-     * Supply null for inapplicable terms. Giveaway claims cannot be countered.
+     * Counters a Pending or Countered proposal as the seller.
+     *
+     * <p>A sale counter requires a price and no borrowing dates; a borrowing counter
+     * requires a start and an end at least five seconds later and no price. Giveaway
+     * claims cannot be countered. The deal becomes Countered with the new terms and the
+     * buyer is notified in the same transaction.
+     *
+     * @param seller the signed-in seller who owns the deal
+     * @param dealId the deal identifier
+     * @param expectedVersion the row version shown to the seller
+     * @param counterPrice the counter sale price, or {@code null} for borrowing counters
+     * @param counterStart the counter borrowing start, or {@code null} for sale counters
+     * @param counterEnd the counter borrowing end, or {@code null} for sale counters
+     * @throws IllegalArgumentException if the seller identity or version is invalid, the
+     *     proposal is not open, the terms are invalid, the counter period expired, the
+     *     deal is a giveaway claim, or the proposal changed concurrently
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
      */
     public void counterOffer(User seller, String dealId, long expectedVersion,
                              Double counterPrice, LocalDateTime counterStart,
