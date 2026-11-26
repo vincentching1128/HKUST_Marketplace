@@ -44,6 +44,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
@@ -1014,7 +1015,10 @@ public class AdminFrontendControllerTest {
                 Button resetBtn = findButtonByText(contentPane, "Reset");
                 TableView<Deal> table = findFirstExact(contentPane, TableView.class);
 
-                assertEquals(8, table.getColumns().size(), "Title/buyer/seller/type/terms/start/end/status");
+                assertEquals(List.of("Item Title", "Buyer", "Seller", "Deal Type",
+                                "Start Date", "Return / Complete Date", "Status"),
+                        table.getColumns().stream().map(TableColumn::getText).toList());
+                assertTrue(allLabelTexts(contentPane).contains("Select a deal to view full agreed terms"));
 
                 // Search by unique prefix -> finds both deals
                 searchField.setText(prefix);
@@ -1029,14 +1033,17 @@ public class AdminFrontendControllerTest {
                 assertEquals("(deleted user)", table.getColumns().get(1).getCellData(0));
                 assertEquals(testSeller.getUsername(), table.getColumns().get(2).getCellData(0));
                 assertEquals("Bought", table.getColumns().get(3).getCellData(0));
-                assertEquals("—", table.getColumns().get(6).getCellData(0));
-                assertEquals("Cancelled", table.getColumns().get(7).getCellData(0));
+                assertEquals("—", table.getColumns().get(5).getCellData(0));
+                assertEquals("Cancelled", table.getColumns().get(6).getCellData(0));
+                table.getSelectionModel().select(0);
+                assertTrue(allLabelTexts(contentPane).stream().anyMatch(text -> text.contains("Buyer: (deleted user)")));
 
                 // Filter to "Borrowed" -> only lendDeal
                 typeFilter.getSelectionModel().select("Borrowed");
                 searchBtn.fire();
                 assertEquals(1, table.getItems().size());
                 assertEquals("Borrowed", table.getColumns().get(3).getCellData(0));
+                assertTrue(allLabelTexts(contentPane).contains("Select a deal to view full agreed terms"));
 
                 // Reset clears search and restores All Types
                 resetBtn.fire();
@@ -1677,9 +1684,13 @@ public class AdminFrontendControllerTest {
                 Deal returnedItem = table.getItems().stream()
                         .filter(d -> returnedListing.getTitle().equals(d.getListingTitle()))
                         .findFirst().orElseThrow();
+                assertTrue(((String) table.getColumns().get(4).getCellData(completedItem)).matches(datePattern));
                 assertTrue(((String) table.getColumns().get(5).getCellData(completedItem)).matches(datePattern));
-                assertTrue(((String) table.getColumns().get(6).getCellData(completedItem)).matches(datePattern));
-                assertTrue(((String) table.getColumns().get(6).getCellData(returnedItem)).matches(datePattern));
+                assertTrue(((String) table.getColumns().get(5).getCellData(returnedItem)).matches(datePattern));
+                table.getSelectionModel().select(completedItem);
+                assertTrue(allLabelTexts(contentPane).contains("Agreed terms: " + completedItem.agreedTermsDisplay()));
+                table.getSelectionModel().select(returnedItem);
+                assertTrue(allLabelTexts(contentPane).contains("Agreed terms: " + returnedItem.agreedTermsDisplay()));
 
                 typeFilter.getSelectionModel().select("Received");
                 searchBtn.fire();

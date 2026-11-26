@@ -66,21 +66,14 @@ class BuyerPortalScreensTest extends BuyerFxFixture {
     }
 
     @ParameterizedTest @EnumSource(ListingType.class)
-    void submitFromDetailsAndReopenTheSameProposalFromMyDeals(ListingType type) throws Exception {
+    void submitFromChatAndReopenTheSameProposalFromMyDeals(ListingType type) throws Exception {
         Listing listing = live(type);
         openDashboard();
         click("View Details");
         waitFor("seller feedback", () -> labelled("No ratings yet"));
         assertTrue(fx(() -> labelled(listing.getDescription()) && labelled("Meet-up Location: Library")));
-        String action = switch (type) {
-            case SELL -> "Make Offer";
-            case LEND -> "Request Borrow";
-            case GIVEAWAY -> "Claim Item";
-        };
-        // Opening from chat must lead back to the same listing and proposal form.
         click("Chat");
         click("Make Formal Proposal");
-        click(action);
         waitFor("proposal dialog", () -> dialog() != null);
         if (type == ListingType.SELL) {
             fx(() -> { dialogField(TextField.class).setText("-1"); return null; });
@@ -100,6 +93,7 @@ class BuyerPortalScreensTest extends BuyerFxFixture {
         dialogClick(type == ListingType.GIVEAWAY ? "OK" : "Submit");
         waitFor("submission confirmation", () -> dialogContains("Proposal submitted and shared in chat"));
         dialogClick("OK");
+        waitFor("proposal appears in the same chat", () -> labelled("Formal proposal"));
         var deal = buys.getMyDeals(buyer).getFirst();
         assertEquals(listing.getId(), deal.getListingId());
         assertEquals(DealStatus.PENDING, deal.getStatus());

@@ -225,6 +225,23 @@
     -fx-text-fill: white;
 }
 
+.admin-deals-table .table-row-cell:filled:hover {
+    -fx-background-color: #F3F5F8;
+}
+.admin-deals-table .table-row-cell:filled:selected {
+    -fx-background-color: #003366;
+}
+.admin-deals-table .table-row-cell:filled:selected .table-cell {
+    -fx-text-fill: #FFFFFF;
+}
+.admin-deals-detail {
+    -fx-padding: 8 12;
+}
+.admin-deals-detail-title {
+    -fx-font-weight: bold;
+    -fx-text-fill: #003366;
+}
+
 /* ---------- Welcome / Auth screens ---------- */
 .auth-pane {
     -fx-background-color: white;

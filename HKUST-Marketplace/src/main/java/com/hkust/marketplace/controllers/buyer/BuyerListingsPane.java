@@ -281,34 +281,16 @@ public class BuyerListingsPane extends VBox {
         return details;
     }
 
-    private record ProposalTerms(Double price, LocalDateTime start, LocalDateTime end) {}
-    private record Submission(Deal deal, boolean sharedInChat) {}
+    record ProposalTerms(Double price, LocalDateTime start, LocalDateTime end) {}
 
     private void submitProposal(Listing listing) {
         ProposalTerms terms = proposalDialog(listing);
         if (terms == null) return;
         User buyer = currentUser.get();
         showContent(new VBox(12, new Label("Submitting your proposal..."), new ProgressIndicator()));
-        runQuery(() -> {
-            Deal deal = deals.submit(buyer, listing.getId(), listing.getType(),
-                    terms.price(), terms.start(), terms.end());
-            boolean shared = false;
-            try {
-                ChatThread thread = chats.openForDeal(buyer, deal.getId());
-                chats.sendProposal(buyer, thread.id(), deal.getId());
-                shared = true;
-            } catch (Exception chatFailure) {
-                // The proposal is committed already; report its true outcome to the buyer.
-                System.err.println("Formal chat message could not be shared for deal " + deal.getId()
-                        + ": " + chatFailure.getMessage());
-            }
-            return new Submission(deal, shared);
-        }, submitted -> {
+        runQuery(() -> saveProposal(deals, chats, buyer, listing, terms, null), shared -> {
             showListingDetails(listing.getId(), detailBack);
-            new Alert(Alert.AlertType.INFORMATION, submitted.sharedInChat()
-                    ? "Proposal submitted and shared in chat. View it in My Deals."
-                    : "Proposal submitted. The formal chat message could not be sent; your deal is saved in My Deals.")
-                    .showAndWait();
+            showSubmissionConfirmation(shared);
         }, failure -> {
             showContent(new VBox(14, button("Back", "btn-outline", detailBack), createDetails(listing)));
             new Alert(Alert.AlertType.ERROR, message(failure,
@@ -316,7 +298,30 @@ public class BuyerListingsPane extends VBox {
         });
     }
 
-    private ProposalTerms proposalDialog(Listing listing) {
+    static boolean saveProposal(BuyerDealService deals, ChatService chats, User buyer, Listing listing,
+                                ProposalTerms terms, String threadId) throws java.sql.SQLException {
+        Deal deal = deals.submit(buyer, listing.getId(), listing.getType(),
+                terms.price(), terms.start(), terms.end());
+        try {
+            String destination = threadId == null ? chats.openForDeal(buyer, deal.getId()).id() : threadId;
+            chats.sendProposal(buyer, destination, deal.getId());
+            return true;
+        } catch (Exception chatFailure) {
+            // The deal has already been saved. Avoid encouraging a duplicate submission.
+            System.err.println("Formal chat message could not be shared for deal " + deal.getId()
+                    + ": " + chatFailure.getMessage());
+            return false;
+        }
+    }
+
+    static void showSubmissionConfirmation(boolean shared) {
+        new Alert(Alert.AlertType.INFORMATION, shared
+                ? "Proposal submitted and shared in chat. View it in My Deals."
+                : "Proposal submitted. The formal chat message could not be sent; your deal is saved in My Deals.")
+                .showAndWait();
+    }
+
+    static ProposalTerms proposalDialog(Listing listing) {
         if (listing.getType() == ListingType.GIVEAWAY) {
             Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
                     "Claim '" + listing.getTitle() + "'? The seller will review your claim.",
@@ -337,7 +342,8 @@ public class BuyerListingsPane extends VBox {
         DatePicker toDate = new DatePicker(defaultStart.toLocalDate());
         TextField fromTime = new TextField(defaultStart.toLocalTime().toString() + ":00");
         TextField toTime = new TextField(defaultStart.plusMinutes(1).toLocalTime().toString() + ":00");
-        Label error = wrapped("");
+        Label error = new Label();
+        error.setWrapText(true);
         error.setStyle("-fx-text-fill: #c62828;");
         if (listing.getType() == ListingType.SELL) {
             price.setPromptText("HK$ amount");

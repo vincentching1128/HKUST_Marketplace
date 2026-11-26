@@ -18,6 +18,7 @@ import com.hkust.marketplace.services.ListingService;
 import com.hkust.marketplace.utils.DummyDataService;
 import com.hkust.marketplace.utils.SceneManager;
 import com.hkust.marketplace.utils.SessionManager;
+import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.collections.FXCollections;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
@@ -42,6 +43,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -1034,37 +1036,33 @@ public class AdminDashboardController {
         errorLabel.managedProperty().bind(errorLabel.visibleProperty());
 
         TableView<Deal> table = new TableView<>();
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        table.getStyleClass().add("admin-deals-table");
         table.setPlaceholder(new Label("No deals found."));
 
-        TableColumn<Deal, String> titleCol = new TableColumn<>("Item Title");
-        titleCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
-                c.getValue().getListingTitle()));
-        TableColumn<Deal, String> buyerCol = new TableColumn<>("Buyer Username");
-        buyerCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
-                displayDealParty(c.getValue().getBuyerUsername())));
-        TableColumn<Deal, String> sellerCol = new TableColumn<>("Seller Username");
-        sellerCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
-                displayDealParty(c.getValue().getSellerUsername())));
-        TableColumn<Deal, String> typeCol = new TableColumn<>("Deal Type");
-        typeCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
-                dealTypeDisplay(c.getValue().getDealType())));
-        TableColumn<Deal, String> startCol = new TableColumn<>("Start Date");
-        startCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
-                dealStartDisplay(c.getValue())));
-        TableColumn<Deal, String> endCol = new TableColumn<>("Return / Complete Date");
-        endCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
-                dealEndDisplay(c.getValue())));
-        TableColumn<Deal, String> statusCol = new TableColumn<>("Status");
-        statusCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(
-                c.getValue().getStatus() == null ? "—" : c.getValue().getStatus().getDisplayName()));
-        TableColumn<Deal, String> termsCol = new TableColumn<>("Agreed terms");
-        termsCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue().agreedTermsDisplay()));
-        table.getColumns().addAll(titleCol, buyerCol, sellerCol, typeCol, termsCol, startCol, endCol, statusCol);
+        var titleCol = dealColumn("Item Title", 130, 220, Deal::getListingTitle);
+        var buyerCol = dealColumn("Buyer", 100, 125, row -> displayDealParty(row.getBuyerUsername()));
+        var sellerCol = dealColumn("Seller", 100, 125, row -> displayDealParty(row.getSellerUsername()));
+        titleCol.setCellFactory(ignored -> wrappingDealCell());
+        buyerCol.setCellFactory(ignored -> wrappingDealCell());
+        sellerCol.setCellFactory(ignored -> wrappingDealCell());
+        table.getColumns().setAll(List.of(
+                titleCol, buyerCol, sellerCol,
+                dealColumn("Deal Type", 88, 104, row -> dealTypeDisplay(row.getDealType())),
+                dealColumn("Start Date", 142, 154, this::dealStartDisplay),
+                dealColumn("Return / Complete Date", 178, 190, this::dealEndDisplay),
+                dealColumn("Status", 100, 110, this::dealStatusDisplay)));
+        double minimumColumnWidth = table.getColumns().stream().mapToDouble(TableColumn::getMinWidth).sum();
+        // Leave room for the vertical scrollbar. In a narrow window, scroll rather than compress the columns.
+        table.widthProperty().addListener((obs, previous, width) -> table.setColumnResizePolicy(
+                width.doubleValue() >= minimumColumnWidth + 20
+                        ? TableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS
+                        : TableView.UNCONSTRAINED_RESIZE_POLICY));
+        VBox details = createDealDetails(table);
 
         // The combo listener is suppressed while Reset sets the selection programmatically.
         boolean[] suppressReload = {false};
         Runnable reload = () -> {
+            table.getSelectionModel().clearSelection();
             ListingType selectedType = switch (typeFilter.getSelectionModel().getSelectedIndex()) {
                 case 1 -> ListingType.SELL;
                 case 2 -> ListingType.LEND;
@@ -1099,10 +1097,73 @@ public class AdminDashboardController {
             reload.run();
         });
 
-        root.getChildren().addAll(filters, errorLabel, countLabel, table);
+        root.getChildren().addAll(filters, errorLabel, countLabel, table, details);
         VBox.setVgrow(table, Priority.ALWAYS);
         contentPane.getChildren().add(root);
         reload.run();
+    }
+
+    private static TableColumn<Deal, String> dealColumn(String title, double minWidth, double prefWidth,
+                                                       Function<Deal, String> value) {
+        TableColumn<Deal, String> column = new TableColumn<>(title);
+        column.setMinWidth(minWidth);
+        column.setPrefWidth(prefWidth);
+        column.setCellValueFactory(cell -> new ReadOnlyStringWrapper(value.apply(cell.getValue())));
+        return column;
+    }
+
+    private static TableCell<Deal, String> wrappingDealCell() {
+        return new TableCell<>() {
+            {
+                setWrapText(true);
+            }
+
+            @Override
+            protected void updateItem(String value, boolean empty) {
+                super.updateItem(value, empty);
+                setText(empty ? null : value);
+            }
+        };
+    }
+
+    private VBox createDealDetails(TableView<Deal> table) {
+        var selected = table.getSelectionModel().selectedItemProperty();
+        Label heading = dealDetailLine();
+        heading.getStyleClass().add("admin-deals-detail-title");
+        heading.textProperty().bind(selected.map(Deal::getListingTitle)
+                .orElse("Select a deal to view full agreed terms"));
+
+        Label parties = dealDetailLine();
+        parties.textProperty().bind(selected.map(row -> "Buyer: " + displayDealParty(row.getBuyerUsername())
+                + "   ·   Seller: " + displayDealParty(row.getSellerUsername())
+                + "   ·   Deal Type: " + dealTypeDisplay(row.getDealType())
+                + "   ·   Status: " + dealStatusDisplay(row)));
+        Label dates = dealDetailLine();
+        dates.textProperty().bind(selected.map(row -> "Start Date: " + dealStartDisplay(row)
+                + "   ·   Return / Complete Date: " + dealEndDisplay(row)));
+        Label terms = dealDetailLine();
+        terms.textProperty().bind(selected.map(row -> {
+            String agreed = row.agreedTermsDisplay();
+            return "Agreed terms: " + (agreed.isBlank() ? "—" : agreed);
+        }));
+        VBox summary = new VBox(4, parties, dates, terms);
+        summary.visibleProperty().bind(selected.isNotNull());
+        summary.managedProperty().bind(summary.visibleProperty());
+
+        VBox details = new VBox(5, heading, summary);
+        details.getStyleClass().addAll("card", "admin-deals-detail");
+        return details;
+    }
+
+    private static Label dealDetailLine() {
+        Label label = new Label();
+        label.setWrapText(true);
+        label.setMinHeight(Region.USE_PREF_SIZE);
+        return label;
+    }
+
+    private String dealStatusDisplay(Deal deal) {
+        return deal.getStatus() == null ? "—" : deal.getStatus().getDisplayName();
     }
 
     /** A deal keeps one participant after an account is deleted; show that clearly in admin. */
