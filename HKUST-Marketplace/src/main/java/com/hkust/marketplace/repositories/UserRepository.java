@@ -1,5 +1,6 @@
 package com.hkust.marketplace.repositories;
 
+import com.hkust.marketplace.models.Notification;
 import com.hkust.marketplace.models.User;
 import com.hkust.marketplace.models.UserRole;
 import com.hkust.marketplace.utils.DatabaseManager;
@@ -17,8 +18,9 @@ import java.util.List;
  * MySQL persistence for accounts in the {@code users} table.
  *
  * <p>Provides lookups, registration, profile and active-state updates, password-hash
- * migration, and permanent deletion. Deletion runs in one transaction and updates related
- * deals, chats, listings, and notifications before removing the account row.
+ * migration, and permanent deletion. Deletion runs in one transaction, notifies the
+ * remaining participants of active deals, and updates related deals, chats, listings, and
+ * notifications before removing the account row.
  */
 public class UserRepository {
 
@@ -308,6 +310,8 @@ public class UserRepository {
      *   <li>locks/validates the account first, so retrying a deletion is idempotent
      *       (a missing account aborts before any counter is touched);</li>
      *   <li>marks the seller's listings REMOVED and deletes the user's notifications;</li>
+     *   <li>notifies the remaining participant of every PENDING, COUNTERED, or ACCEPTED deal
+     *       before those deals are cancelled;</li>
      *   <li>increments the participant-deletion counter ({@code deleted}, capped at 2) on
      *       every deal and chat thread they participate in, cancelling still-open deals when
      *       one participant remains;</li>
@@ -371,6 +375,7 @@ public class UserRepository {
                     stmt.executeUpdate();
                 }
                 //deals: count the deletion, cancel open deals when one participant remains
+                notifyCounterpartiesOfCancelledDeals(conn, name);
                 try (PreparedStatement stmt = conn.prepareStatement(cancelDeals)) {
                     stmt.setString(1, name);
                     stmt.setString(2, name);
@@ -396,6 +401,50 @@ public class UserRepository {
                 try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
                 throw failure;
             }
+        }
+    }
+
+    /**
+     * Notifies the remaining buyer or seller of every active deal that the deletion will cancel.
+     * The inserts use the deletion transaction's connection and run before the deal statuses
+     * change, so the notification and cancellation commit or roll back together.
+     */
+    private void notifyCounterpartiesOfCancelledDeals(Connection conn, String username) throws SQLException {
+        String sql = """
+                SELECT d.buyer_username, d.seller_username, l.itemName
+                FROM deals d
+                JOIN listings l ON l.id = d.listing_id
+                WHERE d.deleted = 0
+                  AND d.status IN ('PENDING','COUNTERED','ACCEPTED')
+                  AND (d.buyer_username = ? OR d.seller_username = ?)
+                FOR UPDATE
+                """;
+        List<Notification> notificationsToCreate = new ArrayList<>();
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, username);
+            stmt.setString(2, username);
+            try (ResultSet rows = stmt.executeQuery()) {
+                while (rows.next()) {
+                    String buyer = rows.getString("buyer_username");
+                    String seller = rows.getString("seller_username");
+                    boolean deletedWasSeller = username.equals(seller);
+                    String recipient = deletedWasSeller ? buyer : seller;
+                    if (recipient == null || recipient.isBlank()) {
+                        continue;
+                    }
+                    String role = deletedWasSeller ? "seller" : "buyer";
+                    String title = deletedWasSeller ? "Seller Account Deleted" : "Buyer Account Deleted";
+                    String message = "The " + role + " @" + username
+                            + " was deleted by an administrator. Your deal for '"
+                            + rows.getString("itemName") + "' has been cancelled. "
+                            + "You can still view the deal in your history.";
+                    notificationsToCreate.add(new Notification(recipient, title, message, "Account"));
+                }
+            }
+        }
+        NotificationRepository notificationRepository = new NotificationRepository();
+        for (Notification notification : notificationsToCreate) {
+            notificationRepository.create(conn, notification);
         }
     }
 

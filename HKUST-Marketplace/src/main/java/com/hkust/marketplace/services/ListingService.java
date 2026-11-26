@@ -21,8 +21,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.Map;
 import java.util.stream.Collectors;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Listing lifecycle service for sellers and administrators, backed by MySQL.
@@ -32,7 +30,6 @@ import java.util.logging.Logger;
  * related notifications inside caller transactions where required.
  */
 public class ListingService {
-    private static final Logger LOGGER = Logger.getLogger(ListingService.class.getName());
     private static final int NOTIFICATION_REASON_LIMIT = 500;
 
     private final UserRepository userRepository;
@@ -137,18 +134,6 @@ public class ListingService {
         return current;
     }
 
-    //check the stored role rather than trusting the account details held by the screen
-    private User requireAdmin(User user) throws SQLException {
-        if (user == null || user.getUsername() == null || user.getUsername().isBlank()) {
-            throw new IllegalArgumentException("An admin account is required.");
-        }
-        User current = userRepository.findByUsername(user.getUsername());
-        if (current == null || current.getRole() != UserRole.ADMIN) {
-            throw new IllegalArgumentException("An admin account is required.");
-        }
-        return current;
-    }
-
     //Create and Edit also require the stored admin account to be active
     private User requireActiveAdmin(User user) throws SQLException {
         User current = user == null || user.getUsername() == null
@@ -232,20 +217,23 @@ public class ListingService {
      * Edits any listing's content as an administrator and returns it to Pending Review.
      *
      * <p>The acting admin must be active. Inside one transaction the owned listing is
-     * locked and re-checked against the supplied seller, and all open proposals are
-     * loaded. An accepted deal blocks the edit; every non-accepted open proposal is
-     * cancelled with an optimistic-version check and its buyer is notified. The content is
-     * then updated, the listing status becomes Pending Review with its previous review
-     * result cleared, and the seller is notified using the pre-edit title. Any failure
-     * rolls the whole transaction back.
+     * locked and re-checked against the supplied seller. Only Pending Review, Live, and
+     * Rejected listings may be edited; Reserved, Sold, Lent, Given, and Removed listings
+     * are rejected before any deal or content write. All open proposals are then loaded.
+     * An accepted deal blocks the edit; every non-accepted open proposal is cancelled with
+     * an optimistic-version check and its buyer is notified. The content is then updated,
+     * the listing status becomes Pending Review with its previous review result cleared,
+     * and the seller is notified using the pre-edit title. Any failure rolls the whole
+     * transaction back.
      *
      * @param admin the acting administrator
      * @param sellerUsername the seller who must own the listing
      * @param id the listing identifier
      * @param changes the replacement content and photo set
      * @throws IllegalArgumentException if the admin is not active, an identifier is
-     *     missing, the listing is missing or owned by another seller, an accepted deal
-     *     exists, or a proposal changed concurrently
+     *     missing, the listing is missing or owned by another seller, its status is not
+     *     Pending Review, Live, or Rejected, an accepted deal exists, or a proposal changed
+     *     concurrently
      * @throws SQLException if any database read or write fails; the transaction is
      *     rolled back
      */
@@ -264,6 +252,7 @@ public class ListingService {
                 if (existing == null) {
                     throw new IllegalArgumentException("Listing not found or no longer owned by this seller.");
                 }
+                checkCanChange(existing);
                 //locks/loads the open proposals; an accepted deal blocks the edit (seller rule)
                 List<Deal> affectedDeals = deals.findAffectedDeals(conn, id);
                 requireNoAcceptedDeals(affectedDeals);
@@ -294,60 +283,84 @@ public class ListingService {
     }
 
     /**
-     * Soft-removes a listing as an administrator and notifies the affected users.
+     * Soft-removes a listing as an administrator in one atomic transaction.
      *
-     * <p>The stored account must have the admin role; the active flag is not re-checked on
-     * this path. A non-blank reason is mandatory and is stored on the listing. After the
-     * status becomes Removed, the seller and each distinct buyer with an open proposal are
-     * notified best-effort: notification failures are logged and do not fail the removal.
+     * <p>The acting account must be an active admin, and the reason and identifiers must be
+     * non-blank. Inside one transaction the owned listing is locked; when no matching
+     * non-removed listing exists the transaction rolls back and this method returns
+     * {@code false}. Every open proposal ({@code PENDING}, {@code COUNTERED}, or
+     * {@code ACCEPTED}) is locked and cancelled with an optimistic-version check; terminal
+     * deals and their history are untouched. The listing is then marked Removed with the
+     * trimmed reason. The seller and each distinct affected buyer receive a
+     * {@code "Listing Removed"} notification inside the same transaction, so deal
+     * cancellation, removal, and notifications commit or roll back together.
      *
-     * @param admin the acting administrator
+     * @param admin the acting administrator; its stored role and active flag are checked
      * @param listingId the listing to remove
      * @param sellerUsername the seller who must own the listing
-     * @param reason the removal reason shown to the users; it may be shortened for the
-     *     notification
+     * @param reason the removal reason shown to the users; it is trimmed before storage and
+     *     may be shortened for the notification
      * @return {@code true} when an existing, not-yet-removed listing was marked Removed;
      *     {@code false} when no matching listing exists or it was already removed
-     * @throws IllegalArgumentException if the account is not an admin, the reason is
-     *     blank, or an identifier is missing
-     * @throws SQLException if the listing lookup, the removal, or the pre-removal deal
-     *     query fails
+     * @throws IllegalArgumentException if the account is not an active admin, the reason or
+     *     an identifier is blank, or an open proposal changed concurrently
+     * @throws SQLException if any database read or write fails; the transaction is
+     *     rolled back
      */
     public boolean removeListingAsAdmin(User admin, String listingId, String sellerUsername,
                                        String reason) throws SQLException {
-        requireAdmin(admin);
-        if (reason == null || reason.isBlank()){
+        requireActiveAdmin(admin);
+        if (reason == null || reason.isBlank()) {
             throw new IllegalArgumentException("Removal reason cannot be blank !");
         }
-
         if (listingId == null || listingId.isBlank()) {
             throw new IllegalArgumentException("A listing ID is required.");
         }
         if (sellerUsername == null || sellerUsername.isBlank()) {
             throw new IllegalArgumentException("A seller username is required.");
         }
-        //read the listing and its open proposals before the status change so the
-        //notifications can name the item and reach every affected buyer
-        Listing listing = listingRepository.findByIdAndSeller(listingId, sellerUsername);
-        List<Deal> affectedDeals = deals.findAffectedDeals(listingId);
-        boolean removed = listingRepository.removeListing(listingId, sellerUsername, reason);
-        if (!removed) {
-            return false;
+        String removalReason = reason.trim();
+        try (Connection conn = connections.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                Listing existing = listingRepository.findByIdAndSellerForUpdate(
+                        conn, listingId, sellerUsername);
+                if (existing == null) {
+                    conn.rollback();
+                    return false;
+                }
+                List<Deal> affectedDeals = deals.findAffectedDeals(conn, listingId);
+                LocalDateTime now = LocalDateTime.now();
+                for (Deal deal : affectedDeals) {
+                    if (!deals.updateStatus(conn, deal.getId(), deal.getStatus(),
+                            deal.getRowVersion(), DealStatus.CANCELLED, now)) {
+                        throw new IllegalArgumentException("A proposal changed. Reload and try again.");
+                    }
+                }
+                if (!listingRepository.removeListing(conn, listingId, sellerUsername, removalReason)) {
+                    conn.rollback();
+                    return false;
+                }
+                notifyListingRemoved(conn, sellerUsername, existing.getTitle(),
+                        shortened(removalReason), affectedDeals);
+                conn.commit();
+                return true;
+            } catch (SQLException | RuntimeException failure) {
+                try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+                throw failure;
+            }
         }
-        String title = listing == null ? "the listing" : "'" + listing.getTitle() + "'";
-        notifyListingRemoved(sellerUsername, title, shortened(reason), affectedDeals);
-        return true;
     }
 
     /**
-     * Notifies the seller and every buyer with an open proposal (PENDING, COUNTERED or
-     * ACCEPTED) on the removed listing. Best-effort: the listing is already removed, so a
-     * notification failure is logged instead of failing the takedown.
+     * Inserts the seller and distinct affected-buyer notifications using the removal
+     * transaction's connection; a failure rolls the whole removal back.
      */
-    private void notifyListingRemoved(String sellerUsername, String title, String reason,
-                                      List<Deal> affectedDeals) {
-        sendNotification(sellerUsername, "Listing Removed",
-                "Your listing " + title + " was removed by an administrator. Reason: " + reason);
+    private void notifyListingRemoved(Connection conn, String sellerUsername, String listingTitle,
+                                      String reason, List<Deal> affectedDeals) throws SQLException {
+        notificationRepository.create(conn, new Notification(sellerUsername, "Listing Removed",
+                "Your listing '" + listingTitle + "' was removed by an administrator. Reason: "
+                        + reason, "Listing"));
         Set<String> buyers = new java.util.LinkedHashSet<>();
         for (Deal deal : affectedDeals) {
             String buyer = deal.getBuyerUsername();
@@ -356,9 +369,9 @@ public class ListingService {
             }
         }
         for (String buyer : buyers) {
-            sendNotification(buyer, "Listing Removed",
-                    "The listing " + title + " you made an offer on was removed by an administrator."
-                            + " Reason: " + reason);
+            notificationRepository.create(conn, new Notification(buyer, "Listing Removed",
+                    "The listing '" + listingTitle + "' you made an offer on was removed by an administrator."
+                            + " Reason: " + reason, "Listing"));
         }
     }
     private void notifyListingEditedbyAdmin(Connection conn, String sellerUsername, String oldListingTitle)
@@ -366,18 +379,6 @@ public class ListingService {
         notificationRepository.create(conn, new Notification(sellerUsername, "Listing Edited",
                 "Your listing '" + oldListingTitle + "' was edited by an administrator and is awaiting review.",
                 "Listing"));
-    }
-
-    /** Persists one listing-related notification; notification failures never block an action. */
-    private void sendNotification(String username, String title, String message) {
-        if (username == null || username.isBlank()) return;
-        try {
-            notificationRepository.create(new Notification(username, title, message, "Listing"));
-        } catch (SQLException ex) {
-            LOGGER.log(Level.WARNING, "Failed to create listing notification for " + username, ex);
-        } catch (IllegalArgumentException invalid) {
-            LOGGER.log(Level.WARNING, "Invalid listing notification for " + username, invalid);
-        }
     }
 
     private static String shortened(String reason) {

@@ -117,25 +117,26 @@ public class AuthService {
     /**
      * Permanently deletes a buyer or seller account on behalf of an administrator.
      *
-     * <p>The caller's account is re-read from the database and must have the
-     * {@link UserRole#ADMIN} role. The account's active flag is not re-checked on this
-     * path. The target is validated by {@link UserRepository#deleteUser(String)}, which
-     * also refuses admin accounts and performs the whole deletion in one transaction
-     * (seller listings removed, open deals cancelled, notifications deleted).
+     * <p>The caller's account is re-read from the database and must be an active
+     * {@link UserRole#ADMIN} account. The target is validated by
+     * {@link UserRepository#deleteUser(String)}, which also refuses admin accounts and
+     * performs the whole deletion in one transaction (seller listings removed, remaining
+     * deal participants notified, open deals cancelled, notifications deleted).
      *
-     * @param admin the administrator performing the deletion; its stored role is checked
+     * @param admin the administrator performing the deletion; its stored role and active
+     *     flag are checked
      * @param username the buyer or seller account to delete
-     * @throws IllegalArgumentException if {@code admin} is missing or not an admin, or if
-     *     the target username is missing, unknown, or an admin account
+     * @throws IllegalArgumentException if {@code admin} is missing or not an active admin,
+     *     or if the target username is missing, unknown, or an admin account
      * @throws SQLException if the deletion transaction fails; all changes are rolled back
      */
     public void deleteUserAsAdmin(User admin, String username) throws SQLException {
         if (admin == null || admin.getUsername() == null || admin.getUsername().isBlank()) {
-            throw new IllegalArgumentException("An admin account is required to delete users.");
+            throw new IllegalArgumentException("An active admin account is required to delete users.");
         }
         User current = users.findByUsername(admin.getUsername());
-        if (current == null || current.getRole() != UserRole.ADMIN) {
-            throw new IllegalArgumentException("An admin account is required to delete users.");
+        if (current == null || !current.isActive() || current.getRole() != UserRole.ADMIN) {
+            throw new IllegalArgumentException("An active admin account is required to delete users.");
         }
         //the repository validates the target and refuses to delete admin accounts
         users.deleteUser(username);

@@ -429,20 +429,25 @@ public class ListingRepository {
     }
 
     /**
-     * Soft delete: marks one owned listing as REMOVED, keeping its row, photos and history.
-     * Removed listings are excluded from every find method in this repository.
+     * Soft-removes an owned listing using the caller's transaction.
      *
-     * <p>Uses a new connection and increments {@code row_version} so a concurrent review or edit
-     * sees a conflict.
+     * <p>The caller owns the connection and commit/rollback, and must pass a connection with
+     * auto-commit disabled. The update marks the row {@code REMOVED}, stores the trimmed
+     * reason, and increments {@code row_version}; photos, deals, and reports are preserved.
      *
-     * @param listingId the listing to remove
+     * @param conn an open connection with auto-commit disabled; it is not closed
+     * @param listingId the listing ID
      * @param username the seller that must own the listing; it is trimmed before use
-     * @param reason the rejection reason recorded on the listing
+     * @param reason the reason recorded on the listing; it is trimmed before storage
      * @return true when the listing existed, was not already removed and was updated
-     * @throws IllegalArgumentException when the listing ID, username or reason is blank
+     * @throws IllegalArgumentException when the connection is not transactional, or the
+     *     listing ID, username, or reason is blank
      * @throws SQLException when the update fails
      */
-    public boolean removeListing(String listingId, String username, String reason) throws SQLException {
+    public boolean removeListing(Connection conn, String listingId, String username, String reason) throws SQLException {
+        if (conn == null || conn.getAutoCommit()) {
+            throw new IllegalArgumentException("A transaction is required.");
+        }
         if (listingId == null || listingId.isBlank()) {
             throw new IllegalArgumentException("A listing ID is required.");
         }
@@ -458,12 +463,41 @@ public class ListingRepository {
                     row_version = row_version + 1
                 WHERE id = ? AND seller_username = ? AND listingStatus <> 'REMOVED'
                 """;
-        try (Connection conn = DatabaseManager.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1,reason);
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, reason.trim());
             stmt.setString(2, listingId);
             stmt.setString(3, username.trim());
             return stmt.executeUpdate() > 0;
+        }
+    }
+
+    /**
+     * Soft delete: marks one owned listing as REMOVED, keeping its row, photos and history.
+     * Removed listings are excluded from every find method in this repository.
+     *
+     * <p>Opens and commits its own transaction on a new connection and increments
+     * {@code row_version} so a concurrent review or edit sees a conflict. Use
+     * {@link #removeListing(Connection, String, String, String)} when the removal must be
+     * atomic with deal cancellation or notification writes.
+     *
+     * @param listingId the listing to remove
+     * @param username the seller that must own the listing; it is trimmed before use
+     * @param reason the rejection reason recorded on the listing; it is trimmed
+     * @return true when the listing existed, was not already removed and was updated
+     * @throws IllegalArgumentException when the listing ID, username or reason is blank
+     * @throws SQLException when the update fails; the transaction is rolled back
+     */
+    public boolean removeListing(String listingId, String username, String reason) throws SQLException {
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                boolean removed = removeListing(conn, listingId, username, reason);
+                conn.commit();
+                return removed;
+            } catch (SQLException | RuntimeException failure) {
+                try { conn.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+                throw failure;
+            }
         }
     }
 

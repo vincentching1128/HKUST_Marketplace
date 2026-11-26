@@ -15,6 +15,7 @@ import java.sql.Timestamp;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -324,6 +325,8 @@ public class DealRepository {
      * validated on the same transaction, the listing is locked with {@code FOR UPDATE}, and a
      * second accepted deal for the listing is rejected. The deal's ID, canonical seller,
      * {@code PENDING} status, row version ({@code 1}) and creation time are set on the object.
+     * The creation time is truncated to microseconds so a {@code DATETIME(6)} round trip cannot
+     * make an immediate cancellation appear to precede creation.
      *
      * @param connection an open connection with auto-commit disabled; it is not closed
      * @param deal the proposal to insert
@@ -359,7 +362,8 @@ public class DealRepository {
         }
         String id = deal.getId() == null ? UUID.randomUUID().toString() : deal.getId();
         requireIdentifier(id, "Deal ID");
-        LocalDateTime created = deal.getCreatedAt() == null ? LocalDateTime.now() : deal.getCreatedAt();
+        LocalDateTime created = (deal.getCreatedAt() == null
+                ? LocalDateTime.now() : deal.getCreatedAt()).truncatedTo(ChronoUnit.MICROS);
         String sql = """
                 INSERT INTO deals (id, buyer_username, seller_username, listing_id, dealType,
                     status, offeredPrice, borrowStartDate, borrowDueDate, createdDate, completedDate)
@@ -533,7 +537,8 @@ public class DealRepository {
      *
      * <p>The deal and its listing are re-read with {@code FOR UPDATE}; on success the guarded
      * update advances {@code row_version}, stores the completion/return time, and, when accepting
-     * a counter, adopts the counter terms while retaining the counter history.
+     * a counter, adopts the counter terms while retaining the counter history. The supplied
+     * action time is truncated to microseconds to match {@code DATETIME(6)} storage.
      *
      * @param connection an open connection with auto-commit disabled; caller owns it
      * @param id the deal ID
@@ -559,6 +564,7 @@ public class DealRepository {
             throw new IllegalArgumentException("Use updateProposal to store counter terms together with COUNTERED status.");
         }
         Objects.requireNonNull(occurredAt, "An action timestamp is required.");
+        occurredAt = occurredAt.truncatedTo(ChronoUnit.MICROS);
         Optional<Deal> found = findByIdForUpdate(connection, id);
         if (found.isEmpty() || found.get().getStatus() != expected
                 || found.get().getRowVersion() != expectedVersion) return false;

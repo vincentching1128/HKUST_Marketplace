@@ -4,8 +4,8 @@
 
 * **Target File:** `AdminPortalTest.java`
 * **Test Scope:** End-to-end backend, service, and MySQL repository functionality for **Task 3: Admin Portal** (`AuthService`, `ListingService`, `NotificationService`, `BuyerListingService`, `UserRepository`, `ListingRepository`, `DealRepository`, `NotificationRepository`, `ReviewRepository`, `ChatRepository`, and `SellerStatsRepository`).
-* **Total Automated Tests:** **47 JUnit 5 `@Test` methods** organized into **9 `@Nested` classes** (Tasks 3.1–3.8 plus the additional edge-coverage suite).
-* **Last verified result:** `mvnw.cmd test -Dtest=AdminPortalTest -DfailIfNoTests=false` → **47 tests, 0 failures, 0 errors, 0 skipped** (2026-11-25).
+* **Total Automated Tests:** **50 JUnit 5 `@Test` methods** organized into **9 `@Nested` classes** (Tasks 3.1–3.8 plus the additional edge-coverage suite).
+* **Last verified result:** `mvnw.cmd test -Dtest=AdminPortalTest -DfailIfNoTests=false` → **50 tests, 0 failures, 0 errors, 0 skipped** (2026-11-26).
 * **Database Safety & Isolation:** Every test generates a unique per-test prefix (`t<8-hex>_`) for temporary users, listings, deals, reviews, chat threads, and notifications, and removes them in `@AfterEach` in foreign-key-safe order. Seeded accounts (`admin`, `alice`, `bob`, `charlie`, `diana`) remain untouched.
 
 ---
@@ -36,7 +36,7 @@
 
 ---
 
-### Task 3.3 — Manage All Users Screen (`Task33_ManageUsersTests` — 5 tests)
+### Task 3.3 — Manage All Users Screen (`Task33_ManageUsersTests` — 7 tests)
 
 | Test Case ID | Method Name | What the Test Verifies |
 | :--- | :--- | :--- |
@@ -45,6 +45,8 @@
 | **TC-USR-03** | `deactivateAndReactivateUser` | Verifies `setActive(false/true)` updates MySQL, blocks login (`ACCOUNT_DEACTIVATED`) while inactive, restores login when reactivated, and throws `IllegalArgumentException` for missing usernames. |
 | **TC-USR-04** | `permanentDeletionCascadesAndPreservesHistoryCorrectly` | Validates the complete permanent deletion policy across both participants: deleting the first user removes their account & notifications, cancels open `PENDING` deals while preserving `COMPLETED` deals, sets `deleted = 1` on deals & chats (keeping them visible to the remaining user/admin); deleting the second user soft-deletes their listings as `REMOVED` (retaining photos with `seller_username = NULL`), advances deals & chats to `deleted = 2` (hiding them from default queries); retrying deletion is idempotent and throws `IllegalArgumentException`. |
 | **TC-USR-05** | `adminAccountsProtectedFromDeletion` | Confirms `ADMIN` accounts cannot be permanently deleted and non-admin callers are blocked from calling `deleteUserAsAdmin`. |
+| **TC-USR-08** | `sellerDeletionNotifiesBuyersWithActiveDeals` | Verifies that deleting a seller creates an `"Account"` notification for the buyer of each `PENDING`/`COUNTERED`/`ACCEPTED` deal, while a buyer whose deal was already `COMPLETED` receives no deletion notification; the active deal becomes `CANCELLED` and the completed deal remains `COMPLETED`. |
+| **TC-USR-09** | `deactivatedAdminCannotDeleteUsers` | Deactivates an admin and confirms `deleteUserAsAdmin` rejects it, leaving the target account intact. |
 
 ---
 
@@ -78,7 +80,7 @@
 
 ---
 
-### Task 3.7 — Manage All Listings Screen (`Task37_ManageAllListingsTests` — 6 tests)
+### Task 3.7 — Manage All Listings Screen (`Task37_ManageAllListingsTests` — 7 tests)
 
 | Test Case ID | Method Name | What the Test Verifies |
 | :--- | :--- | :--- |
@@ -86,8 +88,9 @@
 | **TC-LST-02** | `listingValidationRejectsInvalidFields` | Ensures negative prices, prices with > 2 decimal places, non-positive lending durations (`0`), and listings with > 6 photos throw `IllegalArgumentException`. |
 | **TC-LST-03** | `adminEditCancelsOpenOffersAndNotifiesWithOldTitle` | Verifies editing a live listing atomically updates content, resets status to `PENDING_REVIEW`, cancels open `PENDING` proposals, and notifies both buyers (`"Listing Changed"`) and the seller (`"Listing Edited"`) using the **pre-edit** listing title. |
 | **TC-LST-04** | `adminEditBlockedByAcceptedDeal` | Confirms an admin cannot edit a listing while an `ACCEPTED` deal exists on it (`IllegalArgumentException`), leaving the listing untouched. |
-| **TC-LST-05** | `adminRemoveSoftDeletesAndNotifiesAffectedUsers` | Verifies removal rejects blank reasons, soft-deletes the listing (`listingStatus = 'REMOVED'`, excluded from all finders, duplicate removal returns `false`), and notifies the seller plus buyers with active offers only (excluding `DECLINED` buyers). |
-| **TC-LST-06** | `inactiveAdminAndNonAdminBlockedFromListingActions` | Confirms deactivated admins and non-admin accounts are blocked from creating, editing, or removing listings through `ListingService`. |
+| **TC-LST-05** | `adminRemoveSoftDeletesAndNotifiesAffectedUsers` | Verifies removal rejects blank reasons, atomically soft-deletes the listing (`listingStatus = 'REMOVED'`, excluded from all finders, duplicate removal returns `false`), cancels the open `PENDING` deal while leaving `DECLINED` untouched, and notifies the seller plus the active-offer buyer only. |
+| **TC-LST-06** | `inactiveAdminAndNonAdminBlockedFromListingActions` | Confirms deactivated admins are blocked from creating, editing, and removing listings, and non-admin accounts are blocked from removal. |
+| **TC-LST-12** | `adminEditRejectsNonEditableStatuses` | Sets listings to `RESERVED`, `SOLD`, `LENT`, `GIVEN`, and `REMOVED`, then confirms every admin edit throws `IllegalArgumentException` and leaves status/title unchanged. |
 
 ---
 
@@ -116,13 +119,11 @@
 | **TC-LST-07** | `adminCreationTypesAndPhotoBoundaries` | Admin creates SELL (2-decimal price), GIVEAWAY (cleared price/duration), LEND with `LendingUnit.SECONDS`, exact six photos; empty photo throws. |
 | **TC-LST-08** | `adminEditCancelsOnlyOpenProposals` | Admin edit cancels a COUNTERED deal and notifies its buyer, while DECLINED/COMPLETED deals keep status and their buyers get no `"Listing Changed"` notification. |
 | **TC-LST-09** | `adminTypeChangeClearsObsoleteFields` | SELL -> LEND clears price and stores duration/unit; LEND -> GIVEAWAY clears price/duration/unit. |
-| **TC-LST-10** | `adminRemovalPreservesHistoryAndNotifiesOnlyOpenOffers` | Soft removal preserves deals/chat messages/reports, removes buyer visibility, notifies COUNTERED buyer only, and does not notify COMPLETED buyers or another listing's offer. |
-| **TC-LST-11** | `adminListingAuthorizationMatrix` | Buyer/Seller/null callers are rejected by create/update/remove; deactivated admin is rejected by create/update. |
+| **TC-LST-10** | `adminRemovalCancelsOpenDealsAndPreservesHistory` | Verifies atomic removal cancels `COUNTERED` and `ACCEPTED` deals, preserves a `COMPLETED` deal plus chat messages/report history, removes buyer visibility, and does not notify the completed-deal buyer or another listing's buyer. |
+| **TC-LST-11** | `adminListingAuthorizationMatrix` | Buyer/Seller/null callers are rejected by create/update/remove; a deactivated admin is rejected by create, update, and remove. |
 | **TC-RAT-03** | `reviewUnhideFlaggedAndQueryCoverage` | Hide -> Unhide round-trip (`3.0 -> 5.0 -> 3.0`), flagged review persisted, `findAll()`, `findByRating(1..5)` incl. invalid `0/6`, and one-sided date searches. |
 
-### Known production gaps (reported, not changed)
+### Known production gaps
 
-- `AuthService.deleteUserAsAdmin` validates caller **role** but not `active`, so a deactivated admin can currently delete users. A test expecting rejection would fail until production is fixed.
-- `ListingService.removeListingAsAdmin` uses `requireAdmin` (role only), not `requireActiveAdmin`, so a deactivated admin can currently soft-remove listings.
 - `ReviewRepository.hide(String, Boolean)` negates its argument: `hide(id, false)` hides and `hide(id, true)` unhides. Tests reflect the current API; a cleaner `hide(id)`/`setHidden` API should update both test suites and `AdminDashboardController`.
 - The local MySQL `listings.lending_unit` had to be migrated to include `SECONDS`; `schema.sql` already defines it.

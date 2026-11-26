@@ -718,6 +718,69 @@ public class AdminPortalTest {
                     () -> authService.deleteUserAsAdmin(testBuyer1, testBuyer2.getUsername()));
             assertNotNull(userRepository.findByUsername(testBuyer2.getUsername()));
         }
+
+        /**
+         * Test Case: TC-USR-08
+         * Content: Deleting a seller notifies buyers whose deals are still active.
+         * Steps:
+         *   1. testBuyer1 has a PENDING deal and testBuyer2 has a COMPLETED deal with testSeller1.
+         *   2. Admin permanently deletes testSeller1.
+         * Expected Result:
+         *   - testBuyer1 receives an Account notification for the cancelled deal.
+         *   - testBuyer2, whose deal was already completed, receives no deletion notification.
+         */
+        @Test
+        @DisplayName("TC-USR-08: Seller deletion notifies buyers with non-completed deals only")
+        void sellerDeletionNotifiesBuyersWithActiveDeals() throws SQLException {
+            Listing openListing = createSellerListing(testSeller1, prefix + "DeleteNoticeOpen",
+                    ListingType.SELL, 100.00, null, null, List.of());
+            approveListing(openListing);
+            Deal openDeal = createDeal(testBuyer1, openListing, 90.00, null, null);
+
+            Listing completedListing = createSellerListing(testSeller1, prefix + "DeleteNoticeCompleted",
+                    ListingType.SELL, 100.00, null, null, List.of());
+            approveListing(completedListing);
+            Deal completedDeal = createDeal(testBuyer2, completedListing, 90.00, null, null);
+            LocalDateTime firstTransition = completedDeal.getCreatedAt().plusSeconds(1);
+            transitionDeal(completedDeal.getId(), DealStatus.PENDING, 1L, DealStatus.ACCEPTED,
+                    firstTransition);
+            transitionDeal(completedDeal.getId(), DealStatus.ACCEPTED, 2L, DealStatus.COMPLETED,
+                    firstTransition.plusSeconds(1));
+
+            authService.deleteUserAsAdmin(testAdmin, testSeller1.getUsername());
+
+            assertTrue(notificationRepository.findByRecipient(testBuyer1.getUsername(), true).stream()
+                    .anyMatch(notification -> "Account".equals(notification.getCategory())
+                            && "Seller Account Deleted".equals(notification.getTitle())
+                            && notification.getMessage().contains(testSeller1.getUsername())
+                            && notification.getMessage().contains(openDeal.getListingTitle())
+                            && notification.getMessage().contains("cancelled")));
+            assertTrue(notificationRepository.findByRecipient(testBuyer2.getUsername(), true).stream()
+                    .noneMatch(notification -> "Seller Account Deleted".equals(notification.getTitle())
+                            && notification.getMessage().contains(completedDeal.getListingTitle())));
+
+            assertEquals(DealStatus.CANCELLED,
+                    dealRepository.findById(openDeal.getId()).orElseThrow().getStatus());
+            assertEquals(DealStatus.COMPLETED,
+                    dealRepository.findById(completedDeal.getId()).orElseThrow().getStatus());
+        }
+
+        /**
+         * Test Case: TC-USR-09
+         * Content: A deactivated administrator cannot permanently delete accounts.
+         * Steps:
+         *   1. Deactivate testAdmin2 and attempt to delete testBuyer1.
+         * Expected Result:
+         *   - IllegalArgumentException is thrown and testBuyer1 remains in MySQL.
+         */
+        @Test
+        @DisplayName("TC-USR-09: Deactivated admins cannot delete users")
+        void deactivatedAdminCannotDeleteUsers() throws SQLException {
+            userRepository.setActive(testAdmin2.getUsername(), false);
+            assertThrows(IllegalArgumentException.class,
+                    () -> authService.deleteUserAsAdmin(testAdmin2, testBuyer1.getUsername()));
+            assertNotNull(userRepository.findByUsername(testBuyer1.getUsername()));
+        }
     }
 
     // =========================================================================
@@ -1167,14 +1230,15 @@ public class AdminPortalTest {
 
         /**
          * Test Case: TC-LST-05
-         * Content: Admin soft-removes a listing with a required reason, hides it from all finders,
-         *          and notifies the seller and buyers with open offers only (not declined offers).
+         * Content: Admin atomically soft-removes a listing, cancels its open PENDING deal, and
+         *          notifies the seller and active-offer buyer while leaving a DECLINED deal alone.
          * Steps:
          *   1. Approve listing to LIVE; testBuyer1 submits PENDING offer; testBuyer2 has DECLINED offer.
          *   2. Verify blank reason throws IllegalArgumentException.
          *   3. Remove with valid reason -> true; repeat removal -> false.
          * Expected Result:
          *   - DB row kept with listingStatus='REMOVED'; excluded from findAllListing / findByStatus / findByIdAndSeller.
+         *   - PENDING deal becomes CANCELLED; DECLINED deal remains DECLINED.
          *   - testSeller1 and testBuyer1 receive "Listing Removed" with reason; testBuyer2 is not notified.
          */
         @Test
@@ -1185,7 +1249,7 @@ public class AdminPortalTest {
                     500.00, null, null, List.of());
             approveListing(listing);
 
-            createDeal(testBuyer1, listing, 480.00, null, null);
+            Deal pendingDeal = createDeal(testBuyer1, listing, 480.00, null, null);
             Deal declinedDeal = createDeal(testBuyer2, listing, 450.00, null, null);
             transitionDeal(declinedDeal.getId(), DealStatus.PENDING, 1L, DealStatus.DECLINED,
                     declinedDeal.getCreatedAt().plusSeconds(1));
@@ -1207,6 +1271,10 @@ public class AdminPortalTest {
             assertTrue(listingRepository.findAllListing().stream().noneMatch(l -> l.getId().equals(listing.getId())));
             assertTrue(listingRepository.findByStatus(ListingStatus.REMOVED).isEmpty());
             assertEquals("REMOVED", queryStringColumn("SELECT listingStatus FROM listings WHERE id = ?", listing.getId()));
+            assertEquals(DealStatus.CANCELLED,
+                    dealRepository.findById(pendingDeal.getId()).orElseThrow().getStatus());
+            assertEquals(DealStatus.DECLINED,
+                    dealRepository.findById(declinedDeal.getId()).orElseThrow().getStatus());
 
             // Seller & active-offer buyer notified; declined buyer not notified
             assertTrue(notificationRepository.findByRecipient(testSeller1.getUsername(), false).stream()
@@ -1223,10 +1291,10 @@ public class AdminPortalTest {
          * Test Case: TC-LST-06
          * Content: Authorization guard blocks deactivated admins and non-admin callers from admin listing actions.
          * Steps:
-         *   1. Deactivate testAdmin2; attempt createListingAsAdmin and updateListingAsAdmin.
+         *   1. Deactivate testAdmin2; attempt createListingAsAdmin, updateListingAsAdmin, and removeListingAsAdmin.
          *   2. Attempt removeListingAsAdmin as testBuyer1.
          * Expected Result:
-         *   - All throw IllegalArgumentException.
+         *   - All throw IllegalArgumentException and the listing remains available.
          */
         @Test
         @DisplayName("TC-LST-06: Deactivated admins and non-admins are blocked from admin listing operations")
@@ -1241,7 +1309,68 @@ public class AdminPortalTest {
             assertThrows(IllegalArgumentException.class,
                     () -> listingService.updateListingAsAdmin(testAdmin2, testSeller1.getUsername(), listing.getId(), payload));
             assertThrows(IllegalArgumentException.class,
+                    () -> listingService.removeListingAsAdmin(testAdmin2, listing.getId(),
+                            testSeller1.getUsername(), "Reason"));
+            assertThrows(IllegalArgumentException.class,
                     () -> listingService.removeListingAsAdmin(testBuyer1, listing.getId(), testSeller1.getUsername(), "Reason"));
+            assertNotNull(listingRepository.findByIdAndSeller(listing.getId(), testSeller1.getUsername()));
+        }
+
+        /**
+         * Test Case: TC-LST-12
+         * Content: Admin edits are limited to PENDING_REVIEW, LIVE, and REJECTED listings.
+         * Steps:
+         *   1. Put approved listings into RESERVED, SOLD, LENT, GIVEN, and REMOVED states.
+         *   2. Attempt an admin content edit for each.
+         * Expected Result:
+         *   - Every attempt throws IllegalArgumentException and leaves the listing unchanged.
+         */
+        @Test
+        @DisplayName("TC-LST-12: Admin edit rejects non-editable listing statuses")
+        void adminEditRejectsNonEditableStatuses() throws SQLException {
+            for (ListingStatus status : List.of(ListingStatus.RESERVED, ListingStatus.SOLD,
+                    ListingStatus.LENT, ListingStatus.GIVEN)) {
+                String title = prefix + "Locked" + status;
+                Listing listing = createSellerListing(testSeller1, title, ListingType.SELL,
+                        120.00, null, null, List.of());
+                approveListing(listing);
+                try (Connection conn = DatabaseManager.getConnection();
+                     PreparedStatement stmt = conn.prepareStatement(
+                             "UPDATE listings SET listingStatus = ? WHERE id = ?")) {
+                    stmt.setString(1, status.name());
+                    stmt.setString(2, listing.getId());
+                    stmt.executeUpdate();
+                }
+
+                Listing changes = buildListingModel(prefix + "ShouldNotSave", ListingType.SELL,
+                        110.00, null, null, List.of());
+                assertThrows(IllegalArgumentException.class, () ->
+                        listingService.updateListingAsAdmin(testAdmin, testSeller1.getUsername(),
+                                listing.getId(), changes));
+                assertEquals(status.name(),
+                        queryStringColumn("SELECT listingStatus FROM listings WHERE id = ?", listing.getId()));
+                assertEquals(title,
+                        queryStringColumn("SELECT itemName FROM listings WHERE id = ?", listing.getId()));
+            }
+
+            Listing removed = createSellerListing(testSeller1, prefix + "LockedRemoved",
+                    ListingType.SELL, 120.00, null, null, List.of());
+            approveListing(removed);
+            try (Connection conn = DatabaseManager.getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(
+                         "UPDATE listings SET listingStatus = 'REMOVED' WHERE id = ?")) {
+                stmt.setString(1, removed.getId());
+                stmt.executeUpdate();
+            }
+            Listing changes = buildListingModel(prefix + "ShouldNotSave", ListingType.SELL,
+                    110.00, null, null, List.of());
+            assertThrows(IllegalArgumentException.class, () ->
+                    listingService.updateListingAsAdmin(testAdmin, testSeller1.getUsername(),
+                            removed.getId(), changes));
+            assertEquals("REMOVED",
+                    queryStringColumn("SELECT listingStatus FROM listings WHERE id = ?", removed.getId()));
+            assertEquals(prefix + "LockedRemoved",
+                    queryStringColumn("SELECT itemName FROM listings WHERE id = ?", removed.getId()));
         }
     }
 
@@ -1733,9 +1862,14 @@ public class AdminPortalTest {
             assertNull(giveaway.getLendingUnit());
         }
 
+        /**
+         * Test Case: TC-LST-10
+         * Content: Atomic admin removal cancels COUNTERED/ACCEPTED deals, preserves COMPLETED
+         *          history, chat messages and reports, and notifies only affected open-deal buyers.
+         */
         @Test
-        @DisplayName("TC-LST-10: soft removal preserves deals/chat/report and notifies only active offers")
-        void adminRemovalPreservesHistoryAndNotifiesOnlyOpenOffers() throws SQLException {
+        @DisplayName("TC-LST-10: atomic removal cancels open deals and preserves terminal history")
+        void adminRemovalCancelsOpenDealsAndPreservesHistory() throws SQLException {
             Listing target = approvedListing("RemoveTarget");
             Deal countered = createDeal(testBuyer1, target, 90.00, null, null);
             counterDeal(countered);
@@ -1744,6 +1878,9 @@ public class AdminPortalTest {
                     completed.getCreatedAt().plusSeconds(1));
             transitionDeal(completed.getId(), DealStatus.ACCEPTED, 2L, DealStatus.COMPLETED,
                     completed.getCreatedAt().plusSeconds(2));
+            Deal accepted = createDeal(testBuyer1, target, 85.00, null, null);
+            transitionDeal(accepted.getId(), DealStatus.PENDING, 1L, DealStatus.ACCEPTED,
+                    accepted.getCreatedAt().plusSeconds(1));
             ChatThread thread = createChatThread(countered);
             sendChatMessage(thread, testBuyer1, "Removal history " + prefix);
             buyerListingService.reportListing(testBuyer1, target.getId(), "Report " + prefix);
@@ -1756,8 +1893,9 @@ public class AdminPortalTest {
             assertFalse(liveIds(testBuyer1).contains(target.getId()));
             assertNull(listingRepository.findByIdAndSeller(target.getId(), testSeller1.getUsername()));
             assertEquals("REMOVED", queryStringColumn("SELECT listingStatus FROM listings WHERE id = ?", target.getId()));
-            // Soft removal preserves the deal history/statuses; active proposals are notified.
-            assertEquals(DealStatus.COUNTERED, dealAfterDeletion(countered));
+            // Atomic removal cancels every open deal but preserves terminal history.
+            assertEquals(DealStatus.CANCELLED, dealAfterDeletion(countered));
+            assertEquals(DealStatus.CANCELLED, dealAfterDeletion(accepted));
             assertEquals(DealStatus.COMPLETED, dealAfterDeletion(completed));
             try (Connection conn = DatabaseManager.getConnection()) {
                 assertEquals(1, chatRepository.findMessages(conn, thread.id(), null).size());
@@ -1773,8 +1911,13 @@ public class AdminPortalTest {
                             && n.getMessage().contains(other.getTitle())));
         }
 
+        /**
+         * Test Case: TC-LST-11
+         * Content: Buyer, seller, null, and deactivated-admin callers are rejected by every
+         *          admin listing operation, including removal.
+         */
         @Test
-        @DisplayName("TC-LST-11: create/update/remove authorization matrix (known active-admin gap reported)")
+        @DisplayName("TC-LST-11: create/update/remove authorization matrix including inactive admins")
         void adminListingAuthorizationMatrix() throws SQLException {
             Listing target = createSellerListing(testSeller1, prefix + "AuthTarget",
                     ListingType.SELL, 100.00, null, null, List.of());
@@ -1807,6 +1950,9 @@ public class AdminPortalTest {
             assertThrows(IllegalArgumentException.class,
                     () -> listingService.updateListingAsAdmin(testAdmin2, testSeller1.getUsername(),
                             target.getId(), payload));
+            assertThrows(IllegalArgumentException.class,
+                    () -> listingService.removeListingAsAdmin(testAdmin2, target.getId(),
+                            testSeller1.getUsername(), "Inactive admin"));
         }
 
         @Test
