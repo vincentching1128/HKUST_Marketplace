@@ -17,7 +17,7 @@ Open PowerShell in the folder containing `pom.xml` and `mvnw.cmd`. Connect with 
 mysql -h localhost -P 3306 -u root -p
 ```
 
-At the MySQL prompt, run the following commands. Replace the example password with your own. The schema creates the tables and seeds the demo logins listed below.
+At the MySQL prompt, run the following commands. Replace the example password with your own MySQL password. On a fresh database, the schema creates the tables and seeds one app account, `admin`.
 
 ```sql
 CREATE DATABASE IF NOT EXISTS hkust_marketplace;
@@ -27,7 +27,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON hkust_marketplace.* TO 'marketplace_app'
 exit
 ```
 
-Use a fresh database for a new setup. The schema script creates missing tables and leaves existing table definitions in place. On older databases, check that the `deals.buyer_username` and `deals.seller_username` columns allow `NULL` and that both foreign keys to `users` use `ON DELETE SET NULL`. This preserves deal history when an account is deleted.
+Use a fresh database for a new setup. Re-importing the schema creates missing tables and preserves existing records, including the admin password. On older databases, check that the `deals.buyer_username` and `deals.seller_username` columns allow `NULL` and that both foreign keys to `users` use `ON DELETE SET NULL`. This preserves deal history when an account is deleted.
 
 In the PowerShell session that will launch the app, set the MySQL credentials:
 
@@ -43,7 +43,7 @@ username=marketplace_app
 password=replace-with-your-password
 ```
 
-Keep your MySQL credentials and local configuration files outside the repository.
+These credentials are for the MySQL connection. Use the app's admin credentials below to sign in through the JavaFX login screen. Keep your MySQL credentials and local configuration files outside the repository.
 
 ## How to Run (Windows)
 
@@ -63,9 +63,10 @@ mvn clean javafx:run
 
 ### Run from IntelliJ IDEA
 
-1. Open the project folder as a Maven project
-2. Wait for dependencies to download
-3. Open `MarketplaceApp.java` → right-click → **Run**
+1. Open the inner `HKUST-Marketplace` folder containing `pom.xml` as a Maven project.
+2. Select JDK 21 or newer as the project SDK and wait for Maven to import the dependencies.
+3. Save your MySQL credentials in `%USERPROFILE%\.hkust-marketplace\database.properties` as shown above, or add both `MARKETPLACE_DB_USER` and `MARKETPLACE_DB_PASSWORD` to the IntelliJ Maven run configuration.
+4. Run the `javafx:run` goal from the Maven tool window or from that run configuration.
 
 ### Run from VS Code
 
@@ -73,21 +74,19 @@ mvn clean javafx:run
 2. Open the folder
 3. Run `MarketplaceApp.java`
 
-## Demo Credentials
+## Initial Admin Login
 
 | Role   | Username  | Password   |
 |--------|-----------|------------|
-| Admin  | `admin`   | `admin123` |
-| Buyer  | `alice`   | `password1`|
-| Buyer  | `bob`     | `password1`|
-| Seller | `charlie` | `password1`|
-| Seller | `diana`   | `password1`|
+| Admin  | `admin`   | `Admin123` |
+
+This is the default for a fresh database. Create buyer and seller accounts through **Register** in their respective portals. Automated integration tests load their own buyer and seller fixtures.
 
 ## Run the tests and generate coverage
 
 Run the suite from a desktop session so the JavaFX tests can open and dismiss windows. The Admin suites use the database configured for the test run. Use a fresh MySQL database initialized with `src/main/resources/db/schema.sql` so they can safely create and delete test records. Other MySQL integration fixtures start disposable servers and locate `mysqld` in the standard Windows installation path or on `PATH`. If MySQL is installed elsewhere, set `MYSQLD` to the full executable path before testing.
 
-To keep test data separate from your app data, create a database such as `hkust_marketplace_test`. Import a copy of `schema.sql` with its first line changed to `USE hkust_marketplace_test;` and give your test MySQL account `SELECT`, `INSERT`, `UPDATE`, and `DELETE` privileges on that database. Save the connection details to a properties file outside the repository:
+To keep test data separate from your app data, create a database such as `hkust_marketplace_test`. Import a copy of `schema.sql` with its first line changed to `USE hkust_marketplace_test;` and give your test MySQL account `SELECT`, `INSERT`, `UPDATE`, and `DELETE` privileges on that database. Save the connection details to `%USERPROFILE%\.hkust-marketplace\test-db.properties`, outside the repository.
 
 ```properties
 url=jdbc:mysql://localhost:3306/hkust_marketplace_test
@@ -95,13 +94,17 @@ username=your-test-mysql-user
 password=your-test-mysql-password
 ```
 
-From the folder containing `pom.xml`, run this PowerShell command with the path to that file:
+From the folder containing `pom.xml`, run this in PowerShell. If you saved the config elsewhere, set `$testDbConfig` to its actual path.
 
 ```powershell
-.\mvnw.cmd "-Dmarketplace.db.config=C:/path/to/test-db.properties" "-Dtest=*Test,*IT" clean test jacoco:report
+$testDbConfig = Join-Path $env:USERPROFILE '.hkust-marketplace\test-db.properties'
+if (-not (Test-Path -LiteralPath $testDbConfig -PathType Leaf)) {
+    throw "Test database configuration not found at $testDbConfig"
+}
+.\mvnw.cmd "-Dmarketplace.db.config=$testDbConfig" "-Dtest=*Test,*IT" clean test jacoco:report
 ```
 
-The database override applies to that Maven run. If your normal app database is already a fresh test database, you can omit the override and use the credentials configured above. The test pattern includes both regular JUnit tests and `*IT` integration tests.
+The explicit config file takes precedence over the regular MySQL settings for that Maven run. If your normal app database is already a disposable test database, you can omit the override and use the credentials configured above. The test pattern includes both regular JUnit tests and `*IT` integration tests.
 
 | Report | Output |
 |--------|--------|
